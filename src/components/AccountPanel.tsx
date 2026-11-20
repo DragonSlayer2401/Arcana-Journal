@@ -213,7 +213,11 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled }: Props) => {
         <div>
           <h2>{user ? user.email || 'Your account' : 'Sync your journal'}</h2>
           <p aria-live="polite">
-            {user ? syncStatus : 'Sign in to access your readings across devices.'}
+            {user
+              ? user.emailVerified
+                ? syncStatus
+                : 'Your readings are saved in the guest journal on this device.'
+              : 'Sign in to access your readings across devices.'}
           </p>
         </div>
         <div className="account-actions">
@@ -239,7 +243,9 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled }: Props) => {
       </div>
       {user && !user.emailVerified && (
         <div className="account-verification">
-          <p>Your email address is awaiting verification.</p>
+          <p>
+            Open the verification link in your email, then choose Check verification to enable sync.
+          </p>
           <div className="account-actions">
             <button
               className="text-button"

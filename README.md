@@ -75,9 +75,9 @@ The source/license record is `art/references/sources.json`, and generation promp
 
 ## Journal accounts and backups
 
-Open **Journal** to create an account, sign in, verify your email address, or reset a forgotten password. Readings drawn while signed in sync to that account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
+Open **Journal** to create an account or sign in. New accounts use the guest journal on this device until you open the verification email and choose **Check verification**. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
 
-Guest journals stay in the browser profile and site address that created them. After signing in on that device, choose **Import this device’s journal**, review the destination email and counts, and confirm. The original guest readings remain available when signed out. If Safari and the installed Home Screen app contain different readings, repeat the import in each. Keep the current production address when deploying an update.
+Guest journals stay in the browser profile and site address that created them. To sync existing readings, including those drawn while awaiting verification, open the verified account on that device, choose **Import this device’s journal**, review the destination email and counts, and confirm. The original guest readings remain available when signed out. If Safari and the installed Home Screen app contain different readings, repeat the import in each. Keep the current production address when deploying an update.
 
 **Export journal** downloads a versioned JSON file with every reading in the selected journal, including its original date, question, ordered cards, orientations, and reveal progress. Account export needs a connection to fetch all pages. Choose **Import journal** to preview and merge a backup. Repeating an import preserves previous entries and combines reveal progress. Older readings with matching IDs and different spreads or questions are preserved individually. Anyone with access to a backup can read it. **Copy Reading** shares one spread as readable text.
 
@@ -85,7 +85,7 @@ Deleting a guest reading affects this browser only. Deleting an account reading 
 
 ### Firebase setup for this deployment
 
-The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize `arcana-journal.jacobskip7.workers.dev` for email redirects, and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` enforce ownership of each account’s readings.
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize `arcana-journal.jacobskip7.workers.dev` for email redirects, and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
 
 Before enabling accounts on the live site, publish the rules in **Firestore → Rules**, or use the Firebase CLI from this directory while signed in to the project.
 

@@ -20,7 +20,7 @@ import {
 import { createJournalBackup, mergeReveals, resolveImportReading } from '../domain/journalBackup';
 import { isReading } from '../domain/storage';
 import type { Reading } from '../domain/types';
-import { databaseFor, requireAccount, settledWrites, trackWrite } from './account';
+import { databaseFor, requireVerifiedAccount, settledWrites, trackWrite } from './account';
 
 export {
   isOfflineJournalEnabled,
@@ -110,12 +110,18 @@ const listen = (
   subscribe: (database: Firestore, active: () => boolean) => Promise<() => void> | (() => void),
   onError: (error: Error) => void,
 ): (() => void) => {
+  try {
+    requireVerifiedAccount(uid);
+  } catch (error) {
+    onError(error as Error);
+    return () => {};
+  }
   let cancelled = false;
   let stop: (() => void) | undefined;
   const active = () => {
     if (cancelled) return false;
     try {
-      requireAccount(uid);
+      requireVerifiedAccount(uid);
       return true;
     } catch {
       return false;
@@ -220,7 +226,7 @@ const withReading = (
 ) => {
   const dispatched = (dispatches.get(uid) ?? Promise.resolve()).then(async () => {
     const reference = await readingRef(await databaseFor(uid), uid, id);
-    requireAccount(uid);
+    requireVerifiedAccount(uid);
     return { acknowledgement: write(reference) };
   });
   const queued = dispatched.then(
@@ -254,16 +260,16 @@ const onlineDatabase = async (uid: string) => {
     throw new Error('Connect to the internet to access your complete account journal.');
   const database = await databaseFor(uid);
   await settledWrites(database);
-  requireAccount(uid);
+  requireVerifiedAccount(uid);
   return database;
 };
 const readPage = async (database: Firestore, uid: string, cursor: string | null) => {
-  requireAccount(uid);
+  requireVerifiedAccount(uid);
   const source = query(readingsFor(database, uid), orderBy(documentId()));
   const page = await getDocsFromServer(
     cursor ? query(source, startAfter(cursor), limit(pageSize)) : query(source, limit(pageSize)),
   );
-  requireAccount(uid);
+  requireVerifiedAccount(uid);
   if (page.metadata.hasPendingWrites)
     throw new Error('Wait for your journal to finish syncing, then try again.');
   return page;
@@ -289,7 +295,7 @@ export const clearReadings = (uid: string) =>
         const page = await readPage(database, uid, cursor);
         if (page.empty) return;
         await runTransaction(database, async (transaction) => {
-          requireAccount(uid);
+          requireVerifiedAccount(uid);
           for (const entry of page.docs) transaction.delete(entry.ref);
         });
         cursor = page.size === pageSize ? page.docs[page.size - 1].id : null;
@@ -314,7 +320,7 @@ export const previewAccountImport = async (
   const known = new Map<string, Reading | undefined>();
   const result = emptyResult();
   for (const incoming of readings) {
-    requireAccount(uid);
+    requireVerifiedAccount(uid);
     const { id, existing } = await resolveImportReading(incoming, async (id) => {
       if (!known.has(id)) {
         const snapshot = await getDocFromServer(await readingRef(database, uid, id));
@@ -326,7 +332,7 @@ export const previewAccountImport = async (
     known.set(id, existing ? mergeReveals(existing, incoming) : { ...incoming, id });
     onProgress?.(result.added + result.skipped + result.updated, readings.length);
   }
-  requireAccount(uid);
+  requireVerifiedAccount(uid);
   return result;
 };
 
@@ -342,12 +348,12 @@ export const importAccountReadings = (
       const result = emptyResult();
       for (const incoming of readings) {
         const change = await runTransaction(database, async (transaction) => {
-          requireAccount(uid);
+          requireVerifiedAccount(uid);
           const { id, existing } = await resolveImportReading(incoming, async (id) => {
             const snapshot = await transaction.get(await readingRef(database, uid, id));
             return snapshot.exists() ? decodeReading(snapshot) : undefined;
           });
-          requireAccount(uid);
+          requireVerifiedAccount(uid);
           const action = importChange(existing, incoming);
           const reference = await readingRef(database, uid, id);
           if (action === 'added') transaction.set(reference, encodeReading({ ...incoming, id }));

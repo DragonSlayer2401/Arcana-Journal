@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
+import { verifyEmulatorEmail } from './emulator-email.mjs';
 
 // Run with the Auth and Firestore emulators for demo-arcana-journal. The
 // fixture loads the production SDK adapter in isolated, real browser profiles.
@@ -37,6 +38,7 @@ before(async () => {
             ? [
                 "export * as journal from '/src/cloud/journal.ts';",
                 "export { databaseFor } from '/src/cloud/account.ts';",
+                "export { getAuth } from 'firebase/auth';",
                 "export * as firestore from 'firebase/firestore';",
               ].join('\n')
             : undefined,
@@ -79,8 +81,14 @@ const entry = (id) => ({
   revealed: [false, false],
 });
 const password = 'journal emulator test password';
-const account = async (page, email, create, trusted) =>
-  page.evaluate(
+const verifyAccount = async (page, email) => {
+  await verifyEmulatorEmail(email);
+  const user = await page.evaluate(() => window.kit.journal.refreshAccount());
+  assert.equal(user.emailVerified, true);
+  return user.uid;
+};
+const account = async (page, email, create, trusted) => {
+  const uid = await page.evaluate(
     async (args) => {
       const { journal } = window.kit;
       if (args.create) await journal.signUp(args.email, args.password, args.trusted);
@@ -90,6 +98,72 @@ const account = async (page, email, create, trusted) =>
     },
     { email, password, create, trusted },
   );
+  if (create) assert.equal(await verifyAccount(page, email), uid);
+  return uid;
+};
+
+test('the owner must verify their email before Firestore permits access to readings', async () => {
+  const context = await browser.newContext();
+  try {
+    const page = await open(context);
+    const email = 'verification-' + randomUUID() + '@example.test';
+    await page.evaluate(
+      async ({ email, password }) => {
+        const { journal, firestore, getAuth } = window.kit;
+        await journal.signUp(email, password);
+        const result = await getAuth().currentUser.getIdTokenResult();
+        if (result.claims.email_verified !== false)
+          throw new Error('Expected a pending email verification');
+        // Keep a rules-test client on the actual pre-verification token while the
+        // application refreshes its separate Firestore client's credentials.
+        firestore.connectFirestoreEmulator(firestore.getFirestore(), '127.0.0.1', 8080, {
+          mockUserToken: result.token,
+        });
+      },
+      { email, password },
+    );
+    const uid = await verifyAccount(page, email);
+    const reading = entry(randomUUID());
+    const denied = await page.evaluate(
+      async ({ uid, reading }) => {
+        const { journal, databaseFor, firestore } = window.kit;
+        await journal.createReading(uid, reading);
+        const rows = await firestore.getDocsFromServer(
+          firestore.collection(await databaseFor(uid), 'users', uid, 'readings'),
+        );
+        const [saved] = rows.docs;
+        const pendingClient = firestore.getFirestore();
+        const ref = firestore.doc(pendingClient, saved.ref.path);
+        const errorCode = async (operation) => {
+          try {
+            await operation;
+            return 'allowed';
+          } catch (error) {
+            return error.code;
+          }
+        };
+        const read = await errorCode(firestore.getDocFromServer(ref));
+        const list = await errorCode(firestore.getDocsFromServer(ref.parent));
+        const update = await errorCode(firestore.updateDoc(ref, { revealedSlots: [0] }));
+        const remove = await errorCode(firestore.deleteDoc(ref));
+        await journal.revealCards(uid, reading.id, [0]);
+        await journal.removeReading(uid, reading.id);
+        const create = await errorCode(firestore.setDoc(ref, saved.data()));
+        return { read, list, update, remove, create };
+      },
+      { uid, reading },
+    );
+    assert.deepEqual(denied, {
+      read: 'permission-denied',
+      list: 'permission-denied',
+      update: 'permission-denied',
+      remove: 'permission-denied',
+      create: 'permission-denied',
+    });
+  } finally {
+    await context.close();
+  }
+});
 
 test('two browsers merge reveals, import legacy backups, isolate users, and resume offline work', async () => {
   const first = await browser.newContext();

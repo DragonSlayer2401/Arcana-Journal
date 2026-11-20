@@ -59,16 +59,49 @@ export const isOfflineJournalEnabled = (uid: string): boolean => {
   }
 };
 
-export const requireAccount = (uid: string): User => {
+const requireAccount = (uid: string): User => {
   const user = auth.currentUser;
   if (!user || user.uid !== uid) throw new Error('The journal account has changed. Please retry.');
   return user;
+};
+
+const verificationRequired = 'Verify your email address to use your account journal.';
+export const requireVerifiedAccount = (uid: string): User => {
+  const user = requireAccount(uid);
+  if (!user.emailVerified) throw new Error(verificationRequired);
+  return user;
+};
+
+// A profile restored after following an email link can be newer than its cached ID token.
+const verifyJournalToken = async (user: User, forceRefresh = false) => {
+  let token;
+  try {
+    token = await user.getIdTokenResult(forceRefresh);
+  } catch (error) {
+    // A previously verified trusted user may reopen their cache with an expired token offline.
+    // Firestore obtains a valid token before the server accepts any queued changes.
+    if (
+      !forceRefresh &&
+      isOfflineJournalEnabled(user.uid) &&
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'auth/network-request-failed'
+    )
+      return;
+    throw error;
+  }
+  if (!forceRefresh && token.claims.email_verified !== true) {
+    token = await user.getIdTokenResult(true);
+  }
+  if (token.claims.email_verified !== true) throw new Error(verificationRequired);
 };
 
 interface AccountConnection {
   uid: string;
   trusted: boolean;
   database: Promise<Firestore>;
+  refreshUser: (user: User) => Promise<void>;
   close: () => Promise<void>;
 }
 let connection: AccountConnection | undefined;
@@ -81,7 +114,7 @@ const releaseAccount = () => {
 };
 
 export const databaseFor = (uid: string): Promise<Firestore> => {
-  const user = requireAccount(uid);
+  const user = requireVerifiedAccount(uid);
   const trusted = isOfflineJournalEnabled(uid);
   if (connection?.uid === uid && connection.trusted === trusted) return connection.database;
   releaseAccount();
@@ -89,7 +122,8 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
   // journal can therefore resume offline writes without sharing cache with a different login.
   const name = 'journal-' + uid + (trusted ? '-device' : '-session');
   const opened = closing.then(async () => {
-    requireAccount(uid);
+    await verifyJournalToken(user);
+    requireVerifiedAccount(uid);
     const journalApp = initializeApp(config, name);
     try {
       const journalAuth = initializeAuth(journalApp, { persistence: inMemoryPersistence });
@@ -99,14 +133,14 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
       // Both Firebase apps use the same API key and project. Copy the restored
       // SDK user into this cache's in-memory Auth instance, including on offline reload.
       await updateCurrentUser(journalAuth, user);
-      requireAccount(uid);
+      requireVerifiedAccount(uid);
       const database = initializeFirestore(journalApp, {
         localCache: trusted
           ? persistentLocalCache({ tabManager: persistentMultipleTabManager() })
           : memoryLocalCache(),
       });
       if (useEmulators) connectFirestoreEmulator(database, '127.0.0.1', 8080);
-      return { database, journalApp };
+      return { database, journalApp, journalAuth };
     } catch (error) {
       await deleteApp(journalApp);
       throw error;
@@ -116,6 +150,11 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
     uid,
     trusted,
     database: opened.then(({ database }) => database),
+    refreshUser: async (user) => {
+      const { journalAuth } = await opened;
+      requireVerifiedAccount(uid);
+      await updateCurrentUser(journalAuth, user);
+    },
     close: async () => {
       const { database, journalApp } = await opened;
       try {
@@ -142,8 +181,17 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
     await settling;
     if (!active) return;
     const user = auth.currentUser;
-    if (connection && connection.uid !== user?.uid) releaseAccount();
-    onUser(asAccount(user));
+    if (connection && (connection.uid !== user?.uid || !user?.emailVerified)) releaseAccount();
+    let account = asAccount(user);
+    if (user?.emailVerified && account) {
+      try {
+        await verifyJournalToken(user);
+      } catch {
+        // Keep the local journal available; Check verification can retry when connected.
+        account = { ...account, emailVerified: false };
+      }
+    }
+    if (active && auth.currentUser === user) onUser(account);
   });
   return () => {
     active = false;
@@ -198,7 +246,18 @@ export const sendVerification = async () => {
 };
 export const refreshAccount = async () => {
   const user = auth.currentUser;
-  if (user) await reload(user);
+  if (user) {
+    await reload(user);
+    requireAccount(user.uid);
+    if (user.emailVerified) {
+      await verifyJournalToken(user, true);
+      requireVerifiedAccount(user.uid);
+      if (connection?.uid === user.uid) await connection.refreshUser(user);
+    } else {
+      releaseAccount();
+    }
+    requireAccount(user.uid);
+  }
   const active = asAccount(auth.currentUser);
   for (const listener of refreshListeners) listener(active);
   return active;

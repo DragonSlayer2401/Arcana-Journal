@@ -2,8 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{userId}/readings/{readingId} {
-      function owner() {
-        return request.auth != null && request.auth.uid == userId;
+      function verifiedOwner() {
+        return request.auth != null && request.auth.uid == userId
+          && request.auth.token.email_verified == true;
       }
       function knownCards(cards) {
         return cards.hasOnly([
@@ -49,9 +50,9 @@ service cloud.firestore {
           && r.orientations.hasOnly(['upright','reversed'])
           && validReveals(r.revealedSlots, r.cardIds.size());
       }
-      allow read, delete: if owner();
-      allow create: if owner() && validReading(request.resource.data);
-      allow update: if owner()
+      allow read, delete: if verifiedOwner();
+      allow create: if verifiedOwner() && validReading(request.resource.data);
+      allow update: if verifiedOwner()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revealedSlots'])
         && validReveals(request.resource.data.revealedSlots, resource.data.cardIds.size())
         && request.resource.data.revealedSlots.hasAll(resource.data.revealedSlots);

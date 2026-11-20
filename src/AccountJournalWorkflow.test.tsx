@@ -116,9 +116,14 @@ beforeEach(() => {
 });
 
 describe('account journal workflows', () => {
-  it('imports a guest journal only after confirming the destination and isolates subsequent logins', async () => {
+  it('keeps unverified accounts in the guest journal and imports only after verification and confirmation', async () => {
     const user = userEvent.setup();
     const original = localStorage.getItem(STORAGE_KEY);
+    cloud.signIn.mockImplementation(async () => setAccount({ ...firstUser, emailVerified: false }));
+    cloud.refreshAccount.mockImplementation(async () => {
+      setAccount(firstUser);
+      return firstUser;
+    });
     cloud.previewAccountImport.mockResolvedValue({ added: 1, updated: 0, skipped: 0 });
     cloud.importAccountReadings.mockImplementation(async (uid, entries) => {
       publish(uid, [...records.get(uid)!, ...entries]);
@@ -131,6 +136,15 @@ describe('account journal workflows', () => {
     await user.type(form.getByLabelText('Email address'), firstUser.email);
     await user.type(form.getByLabelText('Password'), 'test-password');
     await user.click(form.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('heading', { name: firstUser.email })).toBeVisible();
+    expect(screen.getByRole('heading', { name: deviceReading.question })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: firstReading.question })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Import this device/ })).toBeNull();
+    expect(cloud.observeReadings).not.toHaveBeenCalled();
+    expect(cloud.observeReading).not.toHaveBeenCalled();
+    expect(cloud.previewAccountImport).not.toHaveBeenCalled();
+    expect(cloud.importAccountReadings).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Check verification' }));
     expect(await screen.findByRole('heading', { name: firstReading.question })).toBeVisible();
     expect(screen.queryByRole('heading', { name: deviceReading.question })).toBeNull();
     expect(cloud.importAccountReadings).not.toHaveBeenCalled();

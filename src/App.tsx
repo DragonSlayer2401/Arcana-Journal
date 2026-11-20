@@ -40,7 +40,15 @@ export default function App() {
         <p role="status">Opening Arcana Journal…</p>
       </main>
     );
-  return <JournalSession key={user?.uid ?? 'guest'} user={user} guestDraft={guestDraft} />;
+  const journalUid = user?.emailVerified ? user.uid : undefined;
+  return (
+    <JournalSession
+      key={journalUid ? `account:${journalUid}` : 'guest'}
+      user={user}
+      journalUid={journalUid}
+      guestDraft={guestDraft}
+    />
+  );
 }
 
 const sessionKey = (uid: string) => `arcana.reading-view.${uid}`;
@@ -69,14 +77,16 @@ const loadAccountView = (uid: string) => {
 
 function JournalSession({
   user,
+  journalUid,
   guestDraft,
 }: {
   user: JournalUser | null;
+  journalUid: string | undefined;
   guestDraft: RefObject<AppData | null>;
 }) {
   const [initial] = useState(() =>
-    user
-      ? loadAccountView(user.uid)
+    journalUid
+      ? loadAccountView(journalUid)
       : guestDraft.current
         ? {
             data: guestDraft.current,
@@ -87,17 +97,17 @@ function JournalSession({
   const [data, setData] = useState(initial.data);
   const dataRef = useRef(data);
   const drawLocked = useRef(Boolean(data.activeId) || data.awaitingNewReading);
-  const account = useAccountJournal(user?.uid, data.activeId);
+  const account = useAccountJournal(journalUid, data.activeId);
   const [deviceCount, setDeviceCount] = useState(() =>
-    user ? (guestDraft.current ?? loadData().data).readings.length : 0,
+    journalUid ? (guestDraft.current ?? loadData().data).readings.length : 0,
   );
   useEffect(() => {
-    if (!user) return;
+    if (!journalUid) return;
     const refreshCount = () =>
       setDeviceCount((guestDraft.current ?? loadData().data).readings.length);
     window.addEventListener('storage', refreshCount);
     return () => window.removeEventListener('storage', refreshCount);
-  }, [user?.uid, guestDraft]);
+  }, [journalUid, guestDraft]);
   const [warning, setWarning] = useState(initial.warning);
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
@@ -112,8 +122,8 @@ function JournalSession({
     'checking',
   );
   const [updateAvailable, setUpdateAvailable] = useState(false);
-  const readings = user ? account.entries : data.readings;
-  const reading = user ? account.active : readings.find((item) => item.id === data.activeId);
+  const readings = journalUid ? account.entries : data.readings;
+  const reading = journalUid ? account.active : readings.find((item) => item.id === data.activeId);
   const count =
     data.settings.mode === 'one'
       ? 1
@@ -144,11 +154,11 @@ function JournalSession({
   };
   // A failed save still leaves a drawn spread available to reveal and export in this session.
   const commit = (next: AppData) => {
-    if (user) {
+    if (journalUid) {
       const { settings, activeId, awaitingNewReading } = next;
       try {
         sessionStorage.setItem(
-          sessionKey(user.uid),
+          sessionKey(journalUid),
           JSON.stringify({ settings, activeId, awaitingNewReading }),
         );
       } catch {
@@ -168,8 +178,8 @@ function JournalSession({
     return loadData();
   };
   const exportJournal = async () => {
-    if (user) {
-      const backup = await exportAccountJournal(user.uid);
+    if (journalUid) {
+      const backup = await exportAccountJournal(journalUid);
       if (!account.recoveryReadings.length) return backup;
       const { readings } = await mergeJournalReadings(
         parseJournalBackup(backup),
@@ -198,14 +208,14 @@ function JournalSession({
     incoming: Reading[],
     onProgress?: (done: number, total: number) => void,
   ) =>
-    user
-      ? previewAccountImport(user.uid, incoming, onProgress)
+    journalUid
+      ? previewAccountImport(journalUid, incoming, onProgress)
       : mergeJournalReadings(deviceJournal().readings, incoming);
   const importJournal = async (
     incoming: Reading[],
     onProgress?: (done: number, total: number) => void,
   ) => {
-    if (user) return importAccountReadings(user.uid, incoming, onProgress);
+    if (journalUid) return importAccountReadings(journalUid, incoming, onProgress);
     // Hashing older IDs can yield. Recheck the source before saving across tabs.
     let current = deviceJournal();
     let result = await mergeJournalReadings(current.readings, incoming);
@@ -251,10 +261,10 @@ function JournalSession({
         cards,
         revealed: cards.map(() => false),
       };
-      if (user) account.saveDraw(result);
+      if (journalUid) account.saveDraw(result);
       commit({
         ...dataRef.current,
-        readings: user ? [] : [result, ...dataRef.current.readings],
+        readings: journalUid ? [] : [result, ...dataRef.current.readings],
         activeId: result.id,
         awaitingNewReading: true,
       });
@@ -270,7 +280,7 @@ function JournalSession({
   };
   const reveal = (index?: number) => {
     const current = dataRef.current;
-    if (user && reading) {
+    if (journalUid && reading) {
       account.reveal(reading.id, index === undefined ? reading.cards.map((_, i) => i) : [index]);
       return;
     }
@@ -306,7 +316,7 @@ function JournalSession({
   };
   const deleteReadings = async () => {
     const current = dataRef.current;
-    if (user && confirmDelete) {
+    if (journalUid && confirmDelete) {
       const id = confirmDelete === 'all' ? undefined : confirmDelete.id;
       setConfirmDelete(null);
       try {
@@ -370,7 +380,7 @@ function JournalSession({
             {readings.length > 0 && (
               <span className="nav-count">
                 {readings.length}
-                {user && account.hasMore ? '+' : ''}
+                {journalUid && account.hasMore ? '+' : ''}
               </span>
             )}
           </NavLink>
@@ -385,12 +395,12 @@ function JournalSession({
       </header>
 
       <main id="main">
-        {user && account.deleteError && (
+        {journalUid && account.deleteError && (
           <p className="notice warning" role="alert">
             {account.deleteError}
           </p>
         )}
-        {user && account.syncError && (
+        {journalUid && account.syncError && (
           <div className="notice warning" role="alert">
             {account.syncError}{' '}
             <button type="button" className="button button-secondary" onClick={account.retrySync}>
@@ -421,7 +431,7 @@ function JournalSession({
                     <Icon name="moon" size={46} />
                     <h1>A little space to begin again.</h1>
                     <p>
-                      {user
+                      {journalUid
                         ? 'This reading is unavailable on this device.'
                         : 'Your previous reading has been removed.'}
                     </p>
@@ -568,7 +578,7 @@ function JournalSession({
                       </span>
                       <span>
                         <Icon name="book" size={17} />{' '}
-                        {user ? 'Your synced reading journal' : 'A journal on your device'}
+                        {journalUid ? 'Your synced reading journal' : 'A journal on your device'}
                       </span>
                     </div>
                   </>
@@ -666,7 +676,7 @@ function JournalSession({
                       </span>
                     </div>
                     <p className="reflection-note">
-                      {user
+                      {journalUid
                         ? account.status
                         : 'A prompt for reflection. You decide what resonates.'}
                     </p>
@@ -681,21 +691,22 @@ function JournalSession({
             element={
               <JournalPage
                 readings={readings}
-                account={Boolean(user)}
+                account={Boolean(journalUid)}
                 loading={account.loading}
-                hasMore={Boolean(user && account.hasMore)}
+                hasMore={Boolean(journalUid && account.hasMore)}
                 onLoadMore={account.loadMore}
                 onOpen={openReading}
                 onRequestDelete={(id) => setConfirmDelete({ id })}
                 onRequestClear={() => setConfirmDelete('all')}
               >
                 <AccountPanel
+                  key={user?.uid ?? 'signed-out'}
                   user={user}
                   syncStatus={account.status}
                   signOutDisabled={account.pending}
                 />
                 <JournalTransfer
-                  accountEmail={user?.email ?? null}
+                  accountEmail={journalUid ? (user?.email ?? null) : null}
                   recoveryReadings={account.recoveryReadings}
                   deviceCount={deviceCount}
                   getDeviceReadings={() => deviceJournal().readings}
@@ -766,10 +777,10 @@ function JournalSession({
             </p>
             <h3>Where your journal is saved</h3>
             <p>
-              Guest readings stay in this browser or installed app. Sign in on the Journal page to
-              sync account readings across devices. To bring over existing readings, choose Import
-              this device’s journal and review the destination. Export journal saves a portable
-              backup. Anyone with the file can read its contents.
+              Guest readings stay in this browser or installed app. Sign in and verify your email on
+              the Journal page to sync account readings across devices. To bring over existing
+              readings, choose Import this device’s journal and review the destination. Export
+              journal saves a portable backup. Anyone with the file can read its contents.
             </p>
             <h3>The deck</h3>
             <p>
@@ -819,7 +830,7 @@ function JournalSession({
           onClose={() => setConfirmDelete(null)}
         >
           <p>
-            {user
+            {journalUid
               ? confirmDelete === 'all'
                 ? 'All readings in your account will be removed from every synced device.'
                 : account.isFailedDraw(confirmDelete.id)
