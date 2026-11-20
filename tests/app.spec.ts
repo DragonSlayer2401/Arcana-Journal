@@ -63,7 +63,7 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
   await page.getByRole('button', { name: /View card details/ }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('button', { name: /Journal/ }).click();
+  await page.getByRole('navigation').getByRole('link', { name: /^Journal/ }).click();
   await page.getByRole('button', { name: /^Open reading:/ }).click();
   await page.reload();
   expect((await saved(page)).readings[0].cards).toEqual(original.cards);

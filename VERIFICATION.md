@@ -6,8 +6,8 @@ Verified on November 19, 2026, on Windows. This is a local production build; no 
 
 - `npm run build`: TypeScript check, all 78 illustration checks, Vite production compilation, and generation of the content-versioned service worker succeeded. All 87 required runtime assets are included in the offline cache manifest.
 - `npm run format:check`: all source and documentation files passed formatting checks.
-- `npm test`: 65 Vitest tests and 7 generated-worker tests passed (72 total).
-- `npm run test:browser`: 24 Playwright tests passed across desktop Chromium, Chromium with an iPhone 13 viewport, and WebKit with an iPhone 13 viewport.
+- `npm test`: 68 Vitest tests and 7 generated-worker tests passed (75 total).
+- `npm run test:browser`: 33 Playwright tests passed across desktop Chromium, Chromium with an iPhone 13 viewport, and WebKit with an iPhone 13 viewport.
 - `npm run test:update`: 1 Chromium deployment-update workflow passed using a separate test-only server.
 
 The algorithm tests use controlled Web Crypto samples only in test code. They check exact rejection boundaries and all six valid Fisher–Yates choice sequences for a three-card deck, rather than using a small frequency experiment as evidence of fairness.
@@ -18,7 +18,7 @@ The browser tests used the actual compiled production application and actual bro
 
 The complete optimized illustrated deck is 14.51 MiB. Each generated scene was visually reviewed against its Rider–Waite–Smith source; corrections were made where needed. These are stylized adaptations, with modest drapery on selected traditionally nude figures. File validation checks dimensions, completeness, duplicate bytes, matching production files, and service-worker inclusion; those structural checks alone do not establish visual accuracy.
 
-Deck library checks covered all 78 entries, search combined with suit filtering, both meanings in a card dialog, and returning to a partially revealed reading. Browsing used zero random samples. Mobile browser tests opened a card and read its meanings offline after a reload.
+Deck library checks covered all 78 entries, search combined with suit filtering, both meanings in a card dialog, and returning to a partially revealed reading. Browsing used zero random samples. Mobile browser tests opened a card and read its meanings offline after a reload. Direct visits and online and offline refreshes on `/deck` and `/journal` restored the matching page. Back and Forward dismissed open dialogs and preserved the exact saved spread and reveal state.
 
 The update test verified that two open app windows keep an update waiting, the active page does not reload, the complete reading stays unchanged, the new worker activates only after both windows close, and the same saved reading reopens afterward. Old-version cache cleanup was also checked.
 

@@ -4,6 +4,8 @@ A complete, browser-only tarot PWA built with React, TypeScript, and Vite. It in
 
 Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
 
+Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. Refresh or bookmark any page, or move between pages using browser Back and Forward. After offline setup, the service worker serves the app at each URL. On a fresh online visit, Cloudflare Pages serves the app using its [single-page application routing](https://developers.cloudflare.com/pages/configuration/serving-pages/#single-page-application-spa-rendering).
+
 There is no application account, backend, database, API key, paid service, analytics, or external font/image dependency. The deployed application runs on the device. A free Cloudflare account is needed only to publish it; visitors do not sign in.
 
 ## Run it
@@ -136,4 +138,5 @@ Before relying on the installed app, run these checks on a physical iPhone; desk
 - Check Copy Reading using iOS's actual clipboard permission behavior. If permission is denied, use the copy fallback presented by the app.
 
 Tests do not establish a physical randomness certificate or promise frequency balance. They verify the specified algorithm and prevent regressions in the user flows that could accidentally redraw cards.
+
 # Arcana-Journal

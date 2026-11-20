@@ -13,7 +13,7 @@ test('the full card library, filters, artwork and both meanings work offline on 
   const saved = await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'));
   await context.setOffline(true);
   await page.reload();
-  await page.getByRole('button', { name: 'Deck', exact: true }).click();
+  await page.getByRole('link', { name: 'Deck', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Card library', level: 1 })).toBeVisible();
   await expect(page.getByRole('button', { name: cardNamePattern })).toHaveCount(78);
 
@@ -52,7 +52,7 @@ test('the full card library, filters, artwork and both meanings work offline on 
     animations: 'disabled',
   });
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('button', { name: 'Reading', exact: true }).click();
+  await page.getByRole('link', { name: 'Reading', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Reveal card/ })).toHaveCount(3);
   expect(await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'))).toBe(saved);
 });

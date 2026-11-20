@@ -1,4 +1,5 @@
-import { StrictMode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +24,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const renderApp = (ui: ReactNode, path = '/') =>
+  render(ui, {
+    wrapper: ({ children }) => <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>,
+  });
+
 const stored = (): AppData => JSON.parse(localStorage.getItem(STORAGE_KEY)!);
 const useSecureSamples = (sample: (index: number) => number = () => 0) => {
   let index = 0;
@@ -32,15 +38,44 @@ const useSecureSamples = (sample: (index: number) => number = () => 0) => {
   });
 };
 const drawButton = () => screen.getByRole('button', { name: /Draw Cards/ });
-const journalButton = () => screen.getByRole('button', { name: /^Journal/ });
+const journalButton = () => screen.getByRole('link', { name: /^Journal/ });
 const cardNamePattern = new RegExp(`^(?:${DECK.map((card) => card.name).join('|')})$`);
+
+describe('routed navigation', () => {
+  it.each([
+    ['/deck', 'Card library', 'Deck'],
+    ['/journal', 'Your reading journal.', 'Journal'],
+  ])('opens %s directly without creating a reading', (path, heading, navigation) => {
+    const random = useSecureSamples();
+    renderApp(<App />, path);
+    expect(screen.getByRole('heading', { name: heading, level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: navigation })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Reading' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Deck' })).toHaveAttribute('href', '/deck');
+    expect(screen.getByRole('link', { name: /^Journal/ })).toHaveAttribute('href', '/journal');
+    expect(random).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('returns from an empty journal through the Go to Reading link without drawing', async () => {
+    const user = userEvent.setup();
+    const random = useSecureSamples();
+    renderApp(<App />, '/journal');
+    const returnLink = screen.getByRole('link', { name: 'Go to Reading' });
+    expect(returnLink).toHaveAttribute('href', '/');
+    await user.click(returnLink);
+    expect(drawButton()).toBeEnabled();
+    expect(screen.getByRole('link', { name: 'Reading' })).toHaveAttribute('aria-current', 'page');
+    expect(random).not.toHaveBeenCalled();
+  });
+});
 
 describe('exploring the card library', () => {
   it('browses all 78 cards, combines search and suit filters, and shows both meanings without drawing', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    render(<App />);
-    await user.click(screen.getByRole('button', { name: 'Deck' }));
+    renderApp(<App />);
+    await user.click(screen.getByRole('link', { name: 'Deck' }));
     expect(screen.getByRole('heading', { name: 'Card library', level: 1 })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: cardNamePattern })).toHaveLength(78);
 
@@ -68,21 +103,21 @@ describe('exploring the card library', () => {
     await user.clear(search);
     expect(screen.getAllByRole('button', { name: cardNamePattern })).toHaveLength(22);
     expect(random).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Reading' }));
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(drawButton()).toBeEnabled();
   });
 
   it('preserves a partially revealed saved reading while visiting the library and card details', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    render(<App />);
+    renderApp(<App />);
     await user.type(screen.getByLabelText(/What’s on your mind/), 'A reading to return to');
     await user.click(drawButton());
     await user.click(screen.getByRole('button', { name: 'Reveal card 2' }));
     const original = stored();
     expect(random).toHaveBeenCalledTimes(77);
 
-    await user.click(screen.getByRole('button', { name: 'Deck' }));
+    await user.click(screen.getByRole('link', { name: 'Deck' }));
     await user.type(screen.getByLabelText('Search cards'), 'The Hermit');
     await user.click(screen.getByRole('button', { name: 'The Hermit' }));
     const hermit = CARD_BY_ID.get('major-09')!;
@@ -91,7 +126,7 @@ describe('exploring the card library', () => {
     expect(dialog).toHaveTextContent(hermit.reversed.meaning);
     await user.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
     expect(stored()).toEqual(original);
-    await user.click(screen.getByRole('button', { name: 'Reading' }));
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(screen.getAllByRole('button', { name: /^Reveal card/ })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
@@ -106,7 +141,7 @@ describe('drawing and revisiting a reading', () => {
   it('stores the full result once, and preserves it through reveal, details, rerenders, journal and restart', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    const view = render(
+    const view = renderApp(
       <StrictMode>
         <App />
       </StrictMode>,
@@ -148,7 +183,7 @@ describe('drawing and revisiting a reading', () => {
     expect(stored().readings[0].cards).toEqual(original.cards);
 
     view.unmount();
-    render(
+    renderApp(
       <StrictMode>
         <App />
       </StrictMode>,
@@ -163,7 +198,7 @@ describe('drawing and revisiting a reading', () => {
   it('guards synchronous repeated submissions and double clicks, and allows repeats after New Reading', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    render(<App />);
+    renderApp(<App />);
     const form = drawButton().closest('form')!;
     act(() => {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -173,7 +208,7 @@ describe('drawing and revisiting a reading', () => {
     expect(stored().readings).toHaveLength(1);
     expect(random).toHaveBeenCalledTimes(77);
     await user.click(journalButton());
-    await user.click(screen.getByRole('button', { name: 'Reading' }));
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'New Reading' }));
     await user.dblClick(drawButton());
@@ -186,7 +221,7 @@ describe('drawing and revisiting a reading', () => {
   it('draws a custom spread with independent saved reversals and retains settings after restart', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples((index) => (index < 77 ? 0 : (index - 77) % 2));
-    const view = render(<App />);
+    const view = renderApp(<App />);
     await user.click(screen.getByRole('button', { name: /Custom/ }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Number of cards' }), '10');
     await user.click(screen.getByRole('checkbox', { name: /Include reversals/ }));
@@ -199,7 +234,7 @@ describe('drawing and revisiting a reading', () => {
     );
     expect(random).toHaveBeenCalledTimes(87);
     view.unmount();
-    render(<App />);
+    renderApp(<App />);
     expect(stored().readings[0].cards).toEqual(original.cards);
     await user.click(screen.getByRole('button', { name: 'New Reading' }));
     expect(screen.getByRole('combobox', { name: 'Number of cards' })).toHaveValue('10');
@@ -210,7 +245,7 @@ describe('drawing and revisiting a reading', () => {
   it('supports a one-card reading and does not draw while changing the question or spread', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    render(<App />);
+    renderApp(<App />);
     await user.click(screen.getByRole('button', { name: /One card/ }));
     await user.type(screen.getByLabelText(/What’s on your mind/), 'A different journal note');
     expect(random).not.toHaveBeenCalled();
@@ -224,7 +259,7 @@ describe('reading recovery and journal controls', () => {
   it('shows a clear error and creates no reading when secure randomness is unavailable', async () => {
     const user = userEvent.setup();
     vi.stubGlobal('crypto', undefined);
-    render(<App />);
+    renderApp(<App />);
     await user.click(drawButton());
     expect(screen.getByRole('alert')).toHaveTextContent('Secure randomness is unavailable');
     expect(screen.getByRole('alert')).toHaveTextContent('No cards were drawn');
@@ -238,7 +273,7 @@ describe('reading recovery and journal controls', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
-    render(<App />);
+    renderApp(<App />);
     await user.click(drawButton());
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Your cards are still available in this session',
@@ -263,7 +298,7 @@ describe('reading recovery and journal controls', () => {
     localStorage.setItem(STORAGE_KEY, '{broken');
     const user = userEvent.setup();
     useSecureSamples();
-    render(<App />);
+    renderApp(<App />);
     expect(screen.getByRole('alert')).toHaveTextContent('Saved data could not be read');
     await user.click(drawButton());
     expect(stored().readings).toHaveLength(1);
@@ -272,7 +307,7 @@ describe('reading recovery and journal controls', () => {
   it('confirms deletion, preserves another active reading, and clears the journal only on confirmation', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    render(<App />);
+    renderApp(<App />);
     await user.type(screen.getByLabelText(/What’s on your mind/), 'First moment');
     await user.click(drawButton());
     await user.click(screen.getByRole('button', { name: 'New Reading' }));
@@ -297,7 +332,7 @@ describe('reading recovery and journal controls', () => {
     expect(stored().readings).toEqual([]);
     expect(stored().activeId).toBeNull();
     expect(screen.getByRole('heading', { name: 'A fresh page awaits.' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Reading' }));
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'New Reading' }));
     expect(drawButton()).toBeEnabled();
@@ -310,7 +345,7 @@ describe('reading recovery and journal controls', () => {
     const clipboard = vi
       .spyOn(navigator.clipboard, 'writeText')
       .mockRejectedValueOnce(new Error('Clipboard denied'));
-    render(<App />);
+    renderApp(<App />);
     await user.type(screen.getByLabelText(/What’s on your mind/), 'Where can I begin?');
     await user.click(drawButton());
     const original = stored().readings[0];
