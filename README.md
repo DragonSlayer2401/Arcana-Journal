@@ -77,7 +77,9 @@ The source/license record is `art/references/sources.json`, and generation promp
 
 Settings and readings are stored in this browser's local storage. History is specific to this device, browser, and site address. It does not sync. A Home Screen installation may have separate storage from Safari depending on the iOS version and installation context; check the journal in the installed app before relying on a reading being available there.
 
-Clearing browser/app data, removing site storage, device loss, or browser storage eviction can erase history and cached assets. The app warns when storage cannot be read or written; a reading can still exist in the current session, but persistence is not promised after a storage failure. Use Copy Reading to keep important entries elsewhere. Delete and Clear History remove local entries; there is no server copy. Anyone with access to this browser profile can view its journal.
+On the Journal page, **Export journal** downloads a versioned JSON backup of every reading, including its ID, original date, question, cards in draw order, orientations, and per-card reveal progress. To restore it here or on another device, choose **Import journal** and select the file. Import adds missing readings and keeps the local copy of any reading with a matching ID. **Copy Reading** shares a single spread as readable text.
+
+Clearing browser/app data, removing site storage, device loss, or browser storage eviction can erase history and cached assets. The app warns when storage cannot be read or written. A reading can still be exported while it is available in the current session. Delete and Clear History remove local entries. Anyone with access to this browser profile or a backup file can read its journal entries.
 
 ## Offline behavior and updates
 

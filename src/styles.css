@@ -789,6 +789,25 @@ h1 {
   line-height: 1.7;
   margin: 28px 0 0;
 }
+.journal-backup {
+  margin-bottom: 24px;
+}
+.journal-backup-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.journal-backup-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.journal-backup-status:not(:empty) {
+  margin-top: 12px;
+}
+.journal-backup-status a {
+  color: var(--gold-bright);
+}
 .journal-list {
   display: grid;
   gap: 15px;
