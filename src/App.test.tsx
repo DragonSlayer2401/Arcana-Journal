@@ -267,12 +267,21 @@ describe('reading recovery and journal controls', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
-  it('keeps the drawn result usable in the current session when storage rejects writes', async () => {
+  it('can revisit and export the session reading when storage rejects writes', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples();
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const failedWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
+    const createObjectURL = vi.fn<(_blob: Blob) => string>().mockReturnValue('blob:journal-test');
+    vi.stubGlobal(
+      'URL',
+      class extends URL {
+        static createObjectURL = createObjectURL;
+        static revokeObjectURL = vi.fn();
+      },
+    );
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
     renderApp(<App />);
     await user.click(drawButton());
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -283,7 +292,21 @@ describe('reading recovery and journal controls', () => {
     const names = screen
       .getAllByRole('button', { name: /View card details/ })
       .map((button) => button.getAttribute('aria-label'));
+    const session: AppData = JSON.parse(failedWrite.mock.lastCall![1]);
     await user.click(journalButton());
+    await user.click(screen.getByRole('button', { name: 'Export journal' }));
+    expect(await screen.findByRole('link', { name: 'Download backup' })).toHaveAttribute(
+      'download',
+    );
+    const [blob] = createObjectURL.mock.calls[0];
+    const json = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(session.readings).toHaveLength(1);
+    expect(JSON.parse(json)).toEqual({ version: 1, readings: session.readings });
     await user.click(screen.getByRole('button', { name: /^Open reading:/ }));
     expect(
       screen
@@ -294,12 +317,25 @@ describe('reading recovery and journal controls', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
-  it('recovers from corrupt saved data with an explanation and a usable drawing form', async () => {
+  it('preserves unreadable storage on export and import and still allows a new draw', async () => {
     localStorage.setItem(STORAGE_KEY, '{broken');
     const user = userEvent.setup();
     useSecureSamples();
     renderApp(<App />);
     expect(screen.getByRole('alert')).toHaveTextContent('Saved data could not be read');
+    await user.click(journalButton());
+    await user.click(screen.getByRole('button', { name: 'Export journal' }));
+    expect(
+      await screen.findByText(/saved journal could not be read to create a backup/i),
+    ).toHaveAttribute('role', 'alert');
+    expect(screen.queryByRole('link', { name: 'Download backup' })).not.toBeInTheDocument();
+    await user.upload(
+      screen.getByLabelText('Journal backup file'),
+      new File(['{"version":1,"readings":[]}'], 'backup.json', { type: 'application/json' }),
+    );
+    expect(await screen.findByText(/saved journal could not be read to merge/i)).toBeVisible();
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{broken');
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
     await user.click(drawButton());
     expect(stored().readings).toHaveLength(1);
   });

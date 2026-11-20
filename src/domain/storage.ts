@@ -16,7 +16,7 @@ export const freshData = (): AppData => ({
   activeId: null,
   awaitingNewReading: false,
 });
-const isReading = (value: unknown): value is Reading => {
+export const isReading = (value: unknown): value is Reading => {
   if (!value || typeof value !== 'object') return false;
   const r = value as Reading;
   return (
@@ -62,7 +62,7 @@ export const loadData = (): { data: AppData; warning: string } => {
     return {
       data: freshData(),
       warning:
-        'Saved data could not be read. You can still draw here, but previous history may be unavailable. Use Copy Reading to keep a separate copy.',
+        'Saved data could not be read. You can still draw here. If you have a journal backup, you can import it in another browser.',
     };
   }
 };
@@ -71,7 +71,7 @@ export const saveData = (data: AppData): string => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     return '';
   } catch {
-    return 'This device could not save your reading or settings. Your cards are still available in this session. Use Copy Reading before leaving.';
+    return 'This device could not save your reading or settings. Your cards are still available in this session. Open Journal and choose Export journal before leaving.';
   }
 };
 export const formatReading = (reading: Reading): string =>

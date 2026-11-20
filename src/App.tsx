@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { DECK, CARD_BY_ID } from './data/deck';
 import { drawCards } from './domain/random';
+import {
+  createJournalBackup,
+  mergeJournalReadings,
+  parseJournalBackup,
+} from './domain/journalBackup';
 import { formatReading, loadData, saveData, type AppData } from './domain/storage';
 import type { Reading, Settings } from './domain/types';
 import { CardArtwork, CardBackArtwork } from './components/CardArtwork';
@@ -20,6 +25,7 @@ export default function App() {
   const [initial] = useState(loadData);
   const [data, setData] = useState(initial.data);
   const dataRef = useRef(data);
+  const hasUnsavedChanges = useRef(false);
   const drawLocked = useRef(Boolean(data.activeId) || data.awaitingNewReading);
   const [warning, setWarning] = useState(initial.warning);
   const [error, setError] = useState('');
@@ -28,7 +34,7 @@ export default function App() {
   const { pathname } = useLocation();
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState<number | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | 'all' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string } | 'all' | null>(null);
   const [copyText, setCopyText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [offline, setOffline] = useState<'checking' | 'ready' | 'unavailable' | 'error'>(
@@ -60,12 +66,52 @@ export default function App() {
     [],
   );
 
-  // All writes happen in explicit event handlers. Store the complete result before rendering a reveal.
-  const commit = (next: AppData) => {
+  const showData = (next: AppData) => {
     dataRef.current = next;
-    const issue = saveData(next);
-    setWarning(issue);
     setData(next);
+  };
+  // A failed save still leaves a drawn spread available to reveal and export in this session.
+  const commit = (next: AppData) => {
+    const issue = saveData(next);
+    hasUnsavedChanges.current = Boolean(issue);
+    setWarning(issue);
+    showData(next);
+  };
+  const currentJournal = () => {
+    if (hasUnsavedChanges.current) return { data: dataRef.current, warning: '' };
+    // Another tab may have added readings since this page opened.
+    return loadData();
+  };
+  const exportJournal = () =>
+    createJournalBackup(() => {
+      const { data: journal, warning: readWarning } = currentJournal();
+      if (readWarning) {
+        throw new Error('The saved journal could not be read to create a backup.');
+      }
+      return { readings: journal.readings, nextCursor: null };
+    });
+  const importJournal = async (json: string) => {
+    const incoming = parseJournalBackup(json);
+    const { data: current, warning: readWarning } = currentJournal();
+    if (readWarning) {
+      throw new Error(
+        'The saved journal could not be read to merge this backup. You can restore the file in another browser.',
+      );
+    }
+    const { readings, added, skipped } = mergeJournalReadings(current.readings, incoming);
+    const next = { ...current, readings };
+    if (added > 0 || hasUnsavedChanges.current) {
+      if (saveData(next)) {
+        throw new Error(
+          'This device could not save the imported readings. Keep your backup and try again.',
+        );
+      }
+      hasUnsavedChanges.current = false;
+      setWarning('');
+    }
+    drawLocked.current = Boolean(next.activeId) || next.awaitingNewReading;
+    showData(next);
+    return { added, skipped };
   };
   const updateSettings = (patch: Partial<Settings>) => {
     const current = dataRef.current;
@@ -82,8 +128,13 @@ export default function App() {
       const requested =
         settings.mode === 'one' ? 1 : settings.mode === 'three' ? 3 : settings.customCount;
       const cards = drawCards(CARD_IDS, requested, settings.reversals);
+      const timestamp = Date.now();
+      let id: string;
+      do {
+        id = `${timestamp}-${++readingSequence}`;
+      } while (dataRef.current.readings.some((item) => item.id === id));
       const result: Reading = {
-        id: `${Date.now()}-${++readingSequence}`,
+        id,
         createdAt: new Date().toISOString(),
         question: question.trim(),
         cards,
@@ -140,7 +191,9 @@ export default function App() {
   const deleteReadings = () => {
     const current = dataRef.current;
     const remaining =
-      confirmDelete === 'all' ? [] : current.readings.filter((item) => item.id !== confirmDelete);
+      confirmDelete === 'all'
+        ? []
+        : current.readings.filter((item) => item.id !== confirmDelete?.id);
     const activeId = remaining.some((item) => item.id === current.activeId)
       ? current.activeId
       : null;
@@ -467,7 +520,10 @@ export default function App() {
               <JournalPage
                 readings={data.readings}
                 onOpen={openReading}
-                onRequestDelete={setConfirmDelete}
+                onRequestDelete={(id) => setConfirmDelete({ id })}
+                onRequestClear={() => setConfirmDelete('all')}
+                onExport={exportJournal}
+                onImport={importJournal}
               />
             }
           />
@@ -532,8 +588,8 @@ export default function App() {
             <h3>Your journal belongs to this device</h3>
             <p>
               Settings and readings stay in this browser or installed app. They do not sync. Private
-              browsing, storage limits, or clearing website data may remove them. Copy important
-              readings somewhere you keep.
+              browsing, storage limits, or clearing website data may remove them. Choose Export
+              journal on the Journal page to save a backup you can import on another device.
             </p>
             <h3>The deck</h3>
             <p>
