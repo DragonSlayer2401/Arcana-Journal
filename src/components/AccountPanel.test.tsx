@@ -1,25 +1,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  refreshAccount,
-  resetPassword,
-  sendVerification,
-  signIn,
-  signOutAccount,
-  signUp,
-} from '../cloud/journal';
+import { refreshAccount, sendVerification, signOutAccount } from '../cloud/journal';
 import type { Reading } from '../domain/types';
 import { AccountPanel } from './AccountPanel';
 import { JournalTransfer } from './JournalTransfer';
 
 vi.mock('../cloud/journal', () => ({
   refreshAccount: vi.fn(),
-  resetPassword: vi.fn(),
   sendVerification: vi.fn(),
-  signIn: vi.fn(),
   signOutAccount: vi.fn(),
-  signUp: vi.fn(),
 }));
 
 beforeAll(() => {
@@ -35,39 +26,17 @@ beforeEach(() => vi.clearAllMocks());
 const person = { uid: 'first', email: 'one@example.org', emailVerified: false };
 
 describe('journal account controls', () => {
-  it('creates an account with trusted-device storage only after opting in', async () => {
-    const user = userEvent.setup();
-    render(<AccountPanel user={null} />);
-    await user.click(screen.getByRole('button', { name: 'Create account' }));
-    const form = within(screen.getByRole('dialog'));
-    await user.type(form.getByLabelText('Email address'), person.email);
-    await user.type(form.getByLabelText('Password'), 'test-password');
-    expect(form.getByRole('checkbox')).not.toBeChecked();
-    await user.click(form.getByRole('checkbox'));
-    await user.click(form.getByRole('button', { name: 'Create account' }));
-    expect(signUp).toHaveBeenCalledWith(person.email, 'test-password', true);
-  });
-
-  it('recovers from a failed sign-in by sending a password reset to the same email', async () => {
-    vi.mocked(signIn).mockRejectedValueOnce({ code: 'auth/invalid-credential' });
-    const user = userEvent.setup();
-    render(<AccountPanel user={null} />);
-    await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    const form = within(screen.getByRole('dialog'));
-    await user.type(form.getByLabelText('Email address'), person.email);
-    await user.type(form.getByLabelText('Password'), 'old-password');
-    await user.click(form.getByRole('button', { name: 'Sign in' }));
-    expect(signIn).toHaveBeenCalledWith(person.email, 'old-password', false);
-    expect(await form.findByRole('alert')).toHaveTextContent('Check your email');
-    await user.click(form.getByRole('button', { name: 'Forgot password?' }));
-    await user.click(form.getByRole('button', { name: 'Send reset email' }));
-    expect(resetPassword).toHaveBeenCalledWith(person.email);
-    expect(form.getByRole('status')).toHaveTextContent(person.email);
+  it('links guests directly to the sign-in and signup pages', () => {
+    render(<AccountPanel user={null} />, { wrapper: MemoryRouter });
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+    expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/signup');
   });
 
   it('resends and checks verification and signs out after pending writes finish', async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<AccountPanel user={person} signOutDisabled />);
+    const { rerender } = render(<AccountPanel user={person} signOutDisabled />, {
+      wrapper: MemoryRouter,
+    });
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Send verification email' }));
     expect(sendVerification).toHaveBeenCalledOnce();

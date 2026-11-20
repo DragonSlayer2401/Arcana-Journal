@@ -4,7 +4,7 @@ A tarot PWA built with React, TypeScript, and Vite. It includes 78 illustrated R
 
 Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
 
-Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. Refresh or bookmark any page, or move between pages using browser Back and Forward. After offline setup, the service worker serves the app at each URL. On a fresh online visit, Cloudflare Pages serves the app using its [single-page application routing](https://developers.cloudflare.com/pages/configuration/serving-pages/#single-page-application-spa-rendering).
+Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. The sign-in, signup, and password-reset forms also support direct links. Cloudflare serves the app at these paths using the [static asset rules](https://developers.cloudflare.com/workers/static-assets/redirects/#proxying) in `public/_redirects`. After offline setup, the service worker serves the cached pages. Account requests need a connection.
 
 Cloudflare serves the static build. Firebase Authentication handles optional email/password accounts, and Cloud Firestore stores each account's journal. Draws and card illustrations work on the device. The Firebase Spark plan covers these services within its free quotas.
 
@@ -75,7 +75,7 @@ The source/license record is `art/references/sources.json`, and generation promp
 
 ## Journal accounts and backups
 
-Open **Journal** to create an account or sign in. New accounts use the guest journal on this device until you open the verification email and choose **Check verification**. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
+Choose **Sign in** (`/login`) or **Create account** (`/signup`) to access your journal with an email address and password. **Forgot password?** opens the password-reset form (`/reset-password`). New accounts use the guest journal on this device until you follow the verification link in your email and choose **Check verification** in Journal. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
 
 Guest journals stay in the browser profile and site address that created them. To sync existing readings, including those drawn while awaiting verification, open the verified account on that device, choose **Import this device’s journal**, review the destination email and counts, and confirm. The original guest readings remain available when signed out. If Safari and the installed Home Screen app contain different readings, repeat the import in each. Keep the current production address when deploying an update.
 

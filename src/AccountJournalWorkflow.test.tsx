@@ -116,6 +116,69 @@ beforeEach(() => {
 });
 
 describe('account journal workflows', () => {
+  it('opens signup from the main sign-in link and creates a trusted account after confirming the password', async () => {
+    const user = userEvent.setup();
+    cloud.signUp.mockImplementation(async () => setAccount({ ...firstUser, emailVerified: false }));
+    mount('/');
+    const signInLink = within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' });
+    await user.click(signInLink);
+    expect(screen.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+    await user.click(
+      within(screen.getByRole('main')).getByRole('link', { name: 'Create account' }),
+    );
+    expect(screen.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
+    await user.type(screen.getByLabelText('Email address'), firstUser.email);
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'test-password');
+    const confirmation = screen.getByLabelText('Confirm password');
+    await user.type(confirmation, 'wrong-password');
+    const submit = screen.getByRole('button', { name: 'Create account' });
+    await user.click(submit);
+    expect(screen.getByRole('alert')).toHaveTextContent(/match/i);
+    expect(cloud.signUp).not.toHaveBeenCalled();
+    await user.clear(confirmation);
+    await user.type(confirmation, 'test-password');
+    const trust = screen.getByRole('checkbox');
+    expect(trust).not.toBeChecked();
+    await user.click(trust);
+    await user.click(submit);
+    expect(cloud.signUp).toHaveBeenCalledWith(firstUser.email, 'test-password', true);
+    expect(await screen.findByRole('heading', { name: 'Your reading journal.' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Check verification' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: deviceReading.question })).toBeVisible();
+    expect(cloud.observeReadings).not.toHaveBeenCalled();
+  });
+
+  it('recovers from a failed login through the password reset page', async () => {
+    const user = userEvent.setup();
+    cloud.signIn.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
+    mount('/login');
+    await user.type(screen.getByLabelText('Email address'), firstUser.email);
+    await user.type(screen.getByLabelText('Password'), 'old-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(cloud.signIn).toHaveBeenCalledWith(firstUser.email, 'old-password', false);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/check your email/i);
+    await user.click(screen.getByRole('link', { name: 'Forgot password?' }));
+    expect(screen.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
+    expect(screen.getByLabelText('Email address')).toHaveValue(firstUser.email);
+    await user.click(screen.getByRole('button', { name: 'Send reset email' }));
+    expect(cloud.resetPassword).toHaveBeenCalledWith(firstUser.email);
+    expect(await screen.findByRole('status')).toHaveTextContent(firstUser.email);
+    await user.click(screen.getByRole('link', { name: 'Back to sign in' }));
+    expect(screen.getByLabelText('Password')).toHaveValue('');
+  });
+
+  it.each(['/login', '/signup', '/reset-password'])(
+    'opens the journal for an existing session at %s',
+    async (path) => {
+      signedIn = firstUser;
+      mount(path);
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Your reading journal.' }),
+      ).toBeVisible();
+      expect(screen.getByRole('heading', { name: firstUser.email })).toBeVisible();
+    },
+  );
+
   it('keeps unverified accounts in the guest journal and imports only after verification and confirmation', async () => {
     const user = userEvent.setup();
     const original = localStorage.getItem(STORAGE_KEY);
@@ -131,8 +194,8 @@ describe('account journal workflows', () => {
     });
     mount();
     expect(screen.getByRole('heading', { name: deviceReading.question })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    const form = within(screen.getByRole('dialog', { name: 'Sign in' }));
+    await user.click(within(screen.getByRole('main')).getByRole('link', { name: 'Sign in' }));
+    const form = within(screen.getByRole('main'));
     await user.type(form.getByLabelText('Email address'), firstUser.email);
     await user.type(form.getByLabelText('Password'), 'test-password');
     await user.click(form.getByRole('button', { name: 'Sign in' }));

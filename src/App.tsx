@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { DECK, CARD_BY_ID } from './data/deck';
 import { drawCards } from './domain/random';
 import {
@@ -16,6 +25,7 @@ import {
   type JournalUser,
 } from './cloud/journal';
 import { useAccountJournal } from './useAccountJournal';
+import { AccountForm } from './components/AccountForm';
 import { AccountPanel } from './components/AccountPanel';
 import { JournalTransfer } from './components/JournalTransfer';
 import type { Reading, Settings } from './domain/types';
@@ -357,14 +367,24 @@ function JournalSession({
   return (
     <div className="app-shell">
       <header className="site-header">
-        <Link className="wordmark" to="/" aria-label="Arcana Journal, reading">
-          <span className="brand-symbol">
-            <Icon name="spark" size={27} />
-          </span>
-          <span>
-            Arcana Journal<span className="wordmark-caption">A LITTLE SPACE FOR REFLECTION</span>
-          </span>
-        </Link>
+        <div className="header-identity">
+          <Link className="wordmark" to="/" aria-label="Arcana Journal, reading">
+            <span className="brand-symbol">
+              <Icon name="spark" size={27} />
+            </span>
+            <span>
+              Arcana Journal<span className="wordmark-caption">A LITTLE SPACE FOR REFLECTION</span>
+            </span>
+          </Link>
+          {!user && (
+            <div className="header-account-links">
+              <NavLink to="/login">Sign in</NavLink>
+              <NavLink className="header-signup" to="/signup">
+                Create account
+              </NavLink>
+            </div>
+          )}
+        </div>
         <nav aria-label="Main navigation">
           <NavLink className="nav-button" to="/" end>
             <Icon name="cards" />
@@ -686,6 +706,11 @@ function JournalSession({
             }
           />
           <Route path="/deck" element={<CardLibrary />} />
+          <Route element={user ? <Navigate to="/journal" replace /> : <Outlet />}>
+            <Route path="/login" element={<AccountForm mode="signIn" />} />
+            <Route path="/signup" element={<AccountForm mode="signUp" />} />
+            <Route path="/reset-password" element={<AccountForm mode="reset" />} />
+          </Route>
           <Route
             path="/journal"
             element={

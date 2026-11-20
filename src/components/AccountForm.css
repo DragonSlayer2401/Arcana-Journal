@@ -1,0 +1,91 @@
+.auth-page {
+  width: 100%;
+  max-width: 30rem;
+  margin: clamp(1.5rem, 6vw, 4rem) auto;
+  padding: clamp(1.25rem, 4vw, 2.25rem);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.auth-page h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(2.25rem, 5vw, 3rem);
+}
+
+.auth-description {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.auth-form label {
+  font-size: 0.9375rem;
+}
+
+.auth-form label:not(:first-child) {
+  margin-top: 0.5rem;
+}
+
+.auth-form input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid #ffffff36;
+  border-radius: 8px;
+  background: #100f1c;
+  color: inherit;
+  font-size: 1rem;
+}
+
+.auth-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.auth-trust {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  line-height: 1.5;
+}
+
+.auth-trust input {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin: 3px 0;
+  accent-color: var(--gold);
+}
+
+.auth-form .notice {
+  margin: 0.5rem 0 0;
+}
+
+.auth-form [type='submit'] {
+  margin-top: 0.75rem;
+}
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  margin-top: 0.75rem;
+}
+
+.auth-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--gold);
+  font-size: 0.9375rem;
+  text-underline-offset: 0.2em;
+}

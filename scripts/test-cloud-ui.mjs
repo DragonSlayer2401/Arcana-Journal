@@ -35,11 +35,15 @@ test('guest readings stay local until email verification and confirmed import, t
     const email = 'journal-' + randomUUID() + '@example.test';
     const password = 'Local-emulator-' + randomUUID();
     const authenticate = async (page, action) => {
-      await page.getByRole('button', { name: action, exact: true }).click();
-      const form = page.getByRole('dialog');
+      const signup = action === 'Create account';
+      await expect(page).toHaveURL(base + (signup ? '/signup' : '/login'));
+      const form = page.getByRole('main');
+      await expect(form.getByRole('heading', { level: 1, name: action })).toBeVisible();
       await form.getByLabel('Email address').fill(email);
       await form.getByLabel('Password', { exact: true }).fill(password);
+      if (signup) await form.getByLabel('Confirm password').fill(password);
       await form.getByRole('button', { name: action, exact: true }).click();
+      await expect(page).toHaveURL(base + '/journal');
       await expect(page.getByRole('heading', { name: email })).toBeVisible();
     };
     const openReading = (page) =>
@@ -49,6 +53,7 @@ test('guest readings stay local until email verification and confirmed import, t
     await first.getByRole('button', { name: /Draw Cards/ }).click();
     await first.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
     await first.getByRole('link', { name: /^Journal/ }).click();
+    await first.getByRole('main').getByRole('link', { name: 'Create account' }).click();
     await authenticate(first, 'Create account');
     await expect(openReading(first)).toBeVisible();
     await expect(first.getByRole('button', { name: 'Import this device’s journal' })).toHaveCount(
@@ -78,7 +83,8 @@ test('guest readings stay local until email verification and confirmed import, t
     await expect(first.getByRole('dialog').getByText(email, { exact: true })).toBeVisible();
     await first.getByRole('button', { name: 'Confirm import' }).click();
     await expect(first.getByText('Imported 2 readings.')).toBeVisible();
-    await second.goto(base + '/journal');
+    await second.goto(base);
+    await second.getByRole('banner').getByRole('link', { name: 'Sign in' }).click();
     await authenticate(second, 'Sign in');
     await openReading(second).click();
     await expect(second.getByRole('button', { name: /View card details/ })).toHaveCount(1);
@@ -88,7 +94,9 @@ test('guest readings stay local until email verification and confirmed import, t
     for (const page of [first, second]) {
       await page.getByRole('link', { name: /^Journal/ }).click();
       await page.getByRole('button', { name: 'Sign out' }).click();
-      await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible();
+      await expect(
+        page.getByRole('main').getByRole('link', { name: 'Create account' }),
+      ).toBeVisible();
     }
     await expect(openReading(second)).toHaveCount(0);
     await openReading(first).click();

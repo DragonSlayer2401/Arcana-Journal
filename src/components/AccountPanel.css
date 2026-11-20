@@ -31,8 +31,7 @@
   display: none;
 }
 
-.account-actions,
-.account-form-links {
+.account-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -44,56 +43,8 @@
   border-top: 1px solid var(--line);
 }
 
-.account-actions .text-button,
-.account-form-links .text-button {
+.account-actions .text-button {
   padding-inline: 4px;
-}
-
-.journal-account-form {
-  display: grid;
-  gap: 16px;
-}
-
-.journal-account-form label {
-  display: grid;
-  gap: 6px;
-  font-size: 0.9375rem;
-}
-
-.journal-account-form input:not([type='checkbox']) {
-  width: 100%;
-  min-height: 46px;
-  padding: 10px 14px;
-  border: 1px solid #ffffff36;
-  border-radius: 8px;
-  background: #100f1c;
-  color: inherit;
-  font-size: 1rem;
-}
-
-.journal-account-form .account-trust {
-  display: flex;
-  align-items: start;
-  gap: 10px;
-  line-height: 1.5;
-}
-
-.account-trust input {
-  flex: none;
-  width: 17px;
-  height: 17px;
-  margin: 3px 0;
-  accent-color: var(--gold);
-}
-
-.account-password-hint {
-  margin: -10px 0 0;
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.account-form-links {
-  justify-content: space-between;
 }
 
 .journal-device-import {
