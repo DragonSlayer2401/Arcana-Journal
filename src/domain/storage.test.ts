@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DECK } from '../data/deck';
-import { formatReading, freshData, loadData, saveData, STORAGE_KEY, type AppData } from './storage';
+import {
+  formatReading,
+  freshData,
+  loadData,
+  RECOVERY_KEY,
+  saveData,
+  STORAGE_KEY,
+  type AppData,
+} from './storage';
 
 const savedData = (): AppData => ({
   ...freshData(),
@@ -105,6 +113,30 @@ describe('local reading persistence', () => {
     });
     expect(loadData().data).toEqual(freshData());
     expect(loadData().warning).toContain('Saved data could not be read');
+  });
+
+  it('preserves unreadable or newer journals when the user keeps drawing', () => {
+    const original = savedData();
+    saveData(original);
+    const newer = JSON.stringify({ ...original, version: 2 });
+    localStorage.setItem(STORAGE_KEY, newer);
+    expect(saveData(freshData())).toBe('');
+    expect(localStorage.getItem(RECOVERY_KEY)).toBe(newer);
+    localStorage.setItem(STORAGE_KEY, '{invalid');
+    expect(loadData().warning).toContain('Saved data could not be read');
+    expect(saveData(original)).toBe('');
+    expect(localStorage.getItem(RECOVERY_KEY)).toBe(newer);
+    expect(localStorage.getItem(RECOVERY_KEY + '.1')).toBe('{invalid');
+    expect(loadData()).toEqual({ data: original, warning: '' });
+  });
+
+  it('retains the damaged source untouched when there is no space for its recovery copy', () => {
+    localStorage.setItem(STORAGE_KEY, '{broken');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    expect(saveData(savedData())).toContain('Your cards are still available in this session');
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('{broken');
   });
 
   it('reports write failure without mutating the caller’s complete reading', () => {

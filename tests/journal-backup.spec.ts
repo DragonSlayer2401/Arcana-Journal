@@ -47,8 +47,10 @@ test('a guest can export the whole journal offline and restore a partially revea
   await page.getByRole('button', { name: 'Clear All Readings' }).click();
   await expect(page.getByRole('heading', { name: 'A fresh page awaits.' })).toBeVisible();
   await importFile(page, backup);
+  await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(2);
   await importFile(page, backup);
+  await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('status')).toContainText(/skipped 2/i);
   await page.reload();
   const restored = await savedJournal(page);
@@ -92,11 +94,14 @@ test('a rejected file leaves the journal intact and a corrected file merges with
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
 
   await upload([imported, { ...existing.readings[0], question: 'Older copy of this question' }]);
-  await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(2);
-  expect(await savedJournal(page)).toEqual({
-    ...existing,
-    readings: [existing.readings[0], imported],
-  });
+  await page.getByRole('button', { name: 'Confirm import' }).click();
+  await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(3);
+  const withCollision = await savedJournal(page);
+  const olderCopy = withCollision.readings.find(
+    ({ question }) => question === 'Older copy of this question',
+  );
+  expect(olderCopy?.id).toMatch(/^import-/);
+  expect(withCollision.readings).toEqual(expect.arrayContaining([existing.readings[0], imported]));
   await page.getByRole('link', { name: 'Reading', exact: true }).click();
   await expect(page.getByText(existing.readings[0].question, { exact: true })).toBeVisible();
   await page.getByRole('link', { name: /^Journal/ }).click();
@@ -105,7 +110,9 @@ test('a rejected file leaves the journal intact and a corrected file merges with
     .getByRole('dialog')
     .getByRole('button', { name: 'Delete Reading', exact: true })
     .click();
-  expect(await savedJournal(page)).toEqual(existing);
+  expect((await savedJournal(page)).readings).toEqual(
+    expect.arrayContaining([existing.readings[0], olderCopy]),
+  );
 });
 
 test('a failed storage write leaves both journals intact and the same backup can be retried', async ({
@@ -132,11 +139,12 @@ test('a failed storage write leaves both journals intact and the same backup can
     };
   });
   await importFile(page, backup);
+  await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
   expect(await savedJournal(page)).toEqual(existing);
 
-  await importFile(page, backup);
+  await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('button', { name: /^Open reading: A new idea/ })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
   const recovered = await savedJournal(page);

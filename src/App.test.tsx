@@ -5,9 +5,15 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { CARD_BY_ID, DECK } from './data/deck';
-import { STORAGE_KEY, type AppData } from './domain/storage';
+import { STORAGE_KEY, RECOVERY_KEY, type AppData } from './domain/storage';
 
 vi.mock('./pwa', () => ({ subscribeOfflineStatus: () => () => {} }));
+vi.mock('./cloud/journal', () => ({
+  observeAccount: (change: (user: null) => void) => {
+    change(null);
+    return () => {};
+  },
+}));
 
 beforeAll(() => {
   // jsdom has no native modal presentation. Keep its open/closed semantics.
@@ -338,6 +344,7 @@ describe('reading recovery and journal controls', () => {
     await user.click(screen.getByRole('link', { name: 'Reading' }));
     await user.click(drawButton());
     expect(stored().readings).toHaveLength(1);
+    expect(localStorage.getItem(RECOVERY_KEY)).toBe('{broken');
   });
 
   it('confirms deletion, preserves another active reading, and clears the journal only on confirmation', async () => {

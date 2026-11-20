@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { DECK, CARD_BY_ID } from './data/deck';
 import { drawCards } from './domain/random';
@@ -7,7 +7,17 @@ import {
   mergeJournalReadings,
   parseJournalBackup,
 } from './domain/journalBackup';
-import { formatReading, loadData, saveData, type AppData } from './domain/storage';
+import { formatReading, freshData, loadData, saveData, type AppData } from './domain/storage';
+import {
+  observeAccount,
+  exportAccountJournal,
+  previewAccountImport,
+  importAccountReadings,
+  type JournalUser,
+} from './cloud/journal';
+import { useAccountJournal } from './useAccountJournal';
+import { AccountPanel } from './components/AccountPanel';
+import { JournalTransfer } from './components/JournalTransfer';
 import type { Reading, Settings } from './domain/types';
 import { CardArtwork, CardBackArtwork } from './components/CardArtwork';
 import { CardLibrary } from './components/CardLibrary';
@@ -17,16 +27,77 @@ import { Modal } from './components/Modal';
 import { subscribeOfflineStatus } from './pwa';
 
 const CARD_IDS = Object.freeze(DECK.map((card) => card.id));
-let readingSequence = 0; // Identity metadata only; never used by the draw algorithm.
 const dateLabel = (date: string) =>
   new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
 export default function App() {
-  const [initial] = useState(loadData);
+  const [user, setUser] = useState<JournalUser | null | undefined>(undefined);
+  const guestDraft = useRef<AppData | null>(null);
+  useEffect(() => observeAccount(setUser), []);
+  if (user === undefined)
+    return (
+      <main>
+        <p role="status">Opening Arcana Journal…</p>
+      </main>
+    );
+  return <JournalSession key={user?.uid ?? 'guest'} user={user} guestDraft={guestDraft} />;
+}
+
+const sessionKey = (uid: string) => `arcana.reading-view.${uid}`;
+const loadAccountView = (uid: string) => {
+  const data = freshData();
+  try {
+    const view = JSON.parse(sessionStorage.getItem(sessionKey(uid)) ?? 'null');
+    if (view) {
+      if (typeof view.activeId === 'string') data.activeId = view.activeId;
+      data.awaitingNewReading = view.awaitingNewReading === true || Boolean(data.activeId);
+      if (
+        ['one', 'three', 'custom'].includes(view.settings?.mode) &&
+        Number.isInteger(view.settings.customCount) &&
+        view.settings.customCount >= 1 &&
+        view.settings.customCount <= 10 &&
+        typeof view.settings.reversals === 'boolean'
+      ) {
+        data.settings = view.settings;
+      }
+    }
+  } catch {
+    /* Tab storage is optional. */
+  }
+  return { data, warning: '' };
+};
+
+function JournalSession({
+  user,
+  guestDraft,
+}: {
+  user: JournalUser | null;
+  guestDraft: RefObject<AppData | null>;
+}) {
+  const [initial] = useState(() =>
+    user
+      ? loadAccountView(user.uid)
+      : guestDraft.current
+        ? {
+            data: guestDraft.current,
+            warning: 'Your unsaved guest readings are available in this session.',
+          }
+        : loadData(),
+  );
   const [data, setData] = useState(initial.data);
   const dataRef = useRef(data);
-  const hasUnsavedChanges = useRef(false);
   const drawLocked = useRef(Boolean(data.activeId) || data.awaitingNewReading);
+  const account = useAccountJournal(user?.uid, data.activeId);
+  const [deviceCount, setDeviceCount] = useState(() =>
+    user ? (guestDraft.current ?? loadData().data).readings.length : 0,
+  );
+  useEffect(() => {
+    if (!user) return;
+    const refreshCount = () =>
+      setDeviceCount((guestDraft.current ?? loadData().data).readings.length);
+    window.addEventListener('storage', refreshCount);
+    return () => window.removeEventListener('storage', refreshCount);
+  }, [user?.uid, guestDraft]);
   const [warning, setWarning] = useState(initial.warning);
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
@@ -41,7 +112,8 @@ export default function App() {
     'checking',
   );
   const [updateAvailable, setUpdateAvailable] = useState(false);
-  const reading = data.readings.find((item) => item.id === data.activeId);
+  const readings = user ? account.entries : data.readings;
+  const reading = user ? account.active : readings.find((item) => item.id === data.activeId);
   const count =
     data.settings.mode === 'one'
       ? 1
@@ -72,46 +144,90 @@ export default function App() {
   };
   // A failed save still leaves a drawn spread available to reveal and export in this session.
   const commit = (next: AppData) => {
+    if (user) {
+      const { settings, activeId, awaitingNewReading } = next;
+      try {
+        sessionStorage.setItem(
+          sessionKey(user.uid),
+          JSON.stringify({ settings, activeId, awaitingNewReading }),
+        );
+      } catch {
+        /* Reading data is saved separately in Firestore. */
+      }
+      showData(next);
+      return;
+    }
     const issue = saveData(next);
-    hasUnsavedChanges.current = Boolean(issue);
+    guestDraft.current = issue ? next : null;
     setWarning(issue);
     showData(next);
   };
   const currentJournal = () => {
-    if (hasUnsavedChanges.current) return { data: dataRef.current, warning: '' };
+    if (guestDraft.current) return { data: guestDraft.current, warning: '' };
     // Another tab may have added readings since this page opened.
     return loadData();
   };
-  const exportJournal = () =>
-    createJournalBackup(() => {
+  const exportJournal = async () => {
+    if (user) {
+      const backup = await exportAccountJournal(user.uid);
+      if (!account.recoveryReadings.length) return backup;
+      const { readings } = await mergeJournalReadings(
+        parseJournalBackup(backup),
+        account.recoveryReadings,
+      );
+      return createJournalBackup(() => ({ readings, nextCursor: null }));
+    }
+    return createJournalBackup(() => {
       const { data: journal, warning: readWarning } = currentJournal();
       if (readWarning) {
         throw new Error('The saved journal could not be read to create a backup.');
       }
       return { readings: journal.readings, nextCursor: null };
     });
-  const importJournal = async (json: string) => {
-    const incoming = parseJournalBackup(json);
-    const { data: current, warning: readWarning } = currentJournal();
+  };
+  const deviceJournal = () => {
+    const { data: device, warning: readWarning } = currentJournal();
     if (readWarning) {
       throw new Error(
         'The saved journal could not be read to merge this backup. You can restore the file in another browser.',
       );
     }
-    const { readings, added, skipped } = mergeJournalReadings(current.readings, incoming);
-    const next = { ...current, readings };
-    if (added > 0 || hasUnsavedChanges.current) {
+    return device;
+  };
+  const previewImport = (
+    incoming: Reading[],
+    onProgress?: (done: number, total: number) => void,
+  ) =>
+    user
+      ? previewAccountImport(user.uid, incoming, onProgress)
+      : mergeJournalReadings(deviceJournal().readings, incoming);
+  const importJournal = async (
+    incoming: Reading[],
+    onProgress?: (done: number, total: number) => void,
+  ) => {
+    if (user) return importAccountReadings(user.uid, incoming, onProgress);
+    // Hashing older IDs can yield. Recheck the source before saving across tabs.
+    let current = deviceJournal();
+    let result = await mergeJournalReadings(current.readings, incoming);
+    let latest = deviceJournal();
+    while (JSON.stringify(latest) !== JSON.stringify(current)) {
+      current = latest;
+      result = await mergeJournalReadings(current.readings, incoming);
+      latest = deviceJournal();
+    }
+    const next = { ...current, readings: result.readings };
+    if (result.added || result.updated || guestDraft.current) {
       if (saveData(next)) {
         throw new Error(
           'This device could not save the imported readings. Keep your backup and try again.',
         );
       }
-      hasUnsavedChanges.current = false;
+      guestDraft.current = null;
       setWarning('');
     }
     drawLocked.current = Boolean(next.activeId) || next.awaitingNewReading;
     showData(next);
-    return { added, skipped };
+    return result;
   };
   const updateSettings = (patch: Partial<Settings>) => {
     const current = dataRef.current;
@@ -128,21 +244,17 @@ export default function App() {
       const requested =
         settings.mode === 'one' ? 1 : settings.mode === 'three' ? 3 : settings.customCount;
       const cards = drawCards(CARD_IDS, requested, settings.reversals);
-      const timestamp = Date.now();
-      let id: string;
-      do {
-        id = `${timestamp}-${++readingSequence}`;
-      } while (dataRef.current.readings.some((item) => item.id === id));
       const result: Reading = {
-        id,
+        id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
         question: question.trim(),
         cards,
         revealed: cards.map(() => false),
       };
+      if (user) account.saveDraw(result);
       commit({
         ...dataRef.current,
-        readings: [result, ...dataRef.current.readings],
+        readings: user ? [] : [result, ...dataRef.current.readings],
         activeId: result.id,
         awaitingNewReading: true,
       });
@@ -158,6 +270,10 @@ export default function App() {
   };
   const reveal = (index?: number) => {
     const current = dataRef.current;
+    if (user && reading) {
+      account.reveal(reading.id, index === undefined ? reading.cards.map((_, i) => i) : [index]);
+      return;
+    }
     commit({
       ...current,
       readings: current.readings.map((item) =>
@@ -188,8 +304,21 @@ export default function App() {
     setError('');
     navigate('/');
   };
-  const deleteReadings = () => {
+  const deleteReadings = async () => {
     const current = dataRef.current;
+    if (user && confirmDelete) {
+      const id = confirmDelete === 'all' ? undefined : confirmDelete.id;
+      setConfirmDelete(null);
+      try {
+        await account.remove(id);
+        if (!id || dataRef.current.activeId === id) {
+          commit({ ...dataRef.current, activeId: null });
+        }
+      } catch {
+        /* The journal displays the cloud error and permits another attempt. */
+      }
+      return;
+    }
     const remaining =
       confirmDelete === 'all'
         ? []
@@ -238,7 +367,12 @@ export default function App() {
           <NavLink className="nav-button" to="/journal">
             <Icon name="book" />
             <span>Journal</span>
-            {data.readings.length > 0 && <span className="nav-count">{data.readings.length}</span>}
+            {readings.length > 0 && (
+              <span className="nav-count">
+                {readings.length}
+                {user && account.hasMore ? '+' : ''}
+              </span>
+            )}
           </NavLink>
           <button
             className="icon-button help-button"
@@ -251,6 +385,19 @@ export default function App() {
       </header>
 
       <main id="main">
+        {user && account.deleteError && (
+          <p className="notice warning" role="alert">
+            {account.deleteError}
+          </p>
+        )}
+        {user && account.syncError && (
+          <div className="notice warning" role="alert">
+            {account.syncError}{' '}
+            <button type="button" className="button button-secondary" onClick={account.retrySync}>
+              Retry sync
+            </button>
+          </div>
+        )}
         {warning && (
           <p className="notice warning" role="alert">
             {warning}
@@ -261,11 +408,23 @@ export default function App() {
             path="/"
             element={
               <>
-                {!reading && data.awaitingNewReading && (
+                {account.loadingActive && (
+                  <div className="empty-journal">
+                    <p role="status">Looking for your saved reading…</p>
+                    <button className="button button-secondary" onClick={newReading}>
+                      Start a new reading
+                    </button>
+                  </div>
+                )}
+                {!account.loadingActive && !reading && data.awaitingNewReading && (
                   <section className="empty-journal">
                     <Icon name="moon" size={46} />
                     <h1>A little space to begin again.</h1>
-                    <p>Your previous reading has been removed.</p>
+                    <p>
+                      {user
+                        ? 'This reading is unavailable on this device.'
+                        : 'Your previous reading has been removed.'}
+                    </p>
                     <button className="button button-gold" onClick={newReading}>
                       <Icon name="spark" />
                       New Reading
@@ -408,7 +567,8 @@ export default function App() {
                         <Icon name="check" size={17} /> Secure, unbiased draws
                       </span>
                       <span>
-                        <Icon name="book" size={17} /> A journal on your device
+                        <Icon name="book" size={17} />{' '}
+                        {user ? 'Your synced reading journal' : 'A journal on your device'}
                       </span>
                     </div>
                   </>
@@ -506,7 +666,9 @@ export default function App() {
                       </span>
                     </div>
                     <p className="reflection-note">
-                      A prompt for reflection. You decide what resonates.
+                      {user
+                        ? account.status
+                        : 'A prompt for reflection. You decide what resonates.'}
                     </p>
                   </section>
                 )}
@@ -518,13 +680,30 @@ export default function App() {
             path="/journal"
             element={
               <JournalPage
-                readings={data.readings}
+                readings={readings}
+                account={Boolean(user)}
+                loading={account.loading}
+                hasMore={Boolean(user && account.hasMore)}
+                onLoadMore={account.loadMore}
                 onOpen={openReading}
                 onRequestDelete={(id) => setConfirmDelete({ id })}
                 onRequestClear={() => setConfirmDelete('all')}
-                onExport={exportJournal}
-                onImport={importJournal}
-              />
+              >
+                <AccountPanel
+                  user={user}
+                  syncStatus={account.status}
+                  signOutDisabled={account.pending}
+                />
+                <JournalTransfer
+                  accountEmail={user?.email ?? null}
+                  recoveryReadings={account.recoveryReadings}
+                  deviceCount={deviceCount}
+                  getDeviceReadings={() => deviceJournal().readings}
+                  onExport={exportJournal}
+                  onPreview={previewImport}
+                  onImport={importJournal}
+                />
+              </JournalPage>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -585,11 +764,12 @@ export default function App() {
               Updates wait until all app windows are closed. A cached update never reloads an active
               reading.
             </p>
-            <h3>Your journal belongs to this device</h3>
+            <h3>Where your journal is saved</h3>
             <p>
-              Settings and readings stay in this browser or installed app. They do not sync. Private
-              browsing, storage limits, or clearing website data may remove them. Choose Export
-              journal on the Journal page to save a backup you can import on another device.
+              Guest readings stay in this browser or installed app. Sign in on the Journal page to
+              sync account readings across devices. To bring over existing readings, choose Import
+              this device’s journal and review the destination. Export journal saves a portable
+              backup. Anyone with the file can read its contents.
             </p>
             <h3>The deck</h3>
             <p>
@@ -639,9 +819,15 @@ export default function App() {
           onClose={() => setConfirmDelete(null)}
         >
           <p>
-            {confirmDelete === 'all'
-              ? 'All readings on this device will be removed.'
-              : 'This reading will be removed from this device.'}{' '}
+            {user
+              ? confirmDelete === 'all'
+                ? 'All readings in your account will be removed from every synced device.'
+                : account.isFailedDraw(confirmDelete.id)
+                  ? 'This unsynced reading will be discarded from this tab.'
+                  : 'This reading will be removed from your account and every synced device.'
+              : confirmDelete === 'all'
+                ? 'All readings on this device will be removed.'
+                : 'This reading will be removed from this device.'}{' '}
             This cannot be undone.
           </p>
           <div className="modal-actions">
