@@ -1,0 +1,11 @@
+node_modules/
+dist/
+playwright-report/
+test-results/
+*.zip
+*.log
+release/
+art/references/style-reference.png
+art/references/rws/
+art/generated/*.png
+art/previews/

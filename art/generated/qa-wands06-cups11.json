@@ -1,0 +1,271 @@
+{
+  "generationTool": "built-in image_gen",
+  "cards": [
+    {
+      "id": "minor-wands-06",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "4f20f5b880f4d424740d9b24febd827451aea5c383add24b73c1c0d978eadddb",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-07",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "b5635942cc37721473f287317d2e1746ebd8a805f40a3e9d67cb7432413ef71b",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-08",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "d43a2955565bfef3ae2272aaa396fb8a206fe0e364c2e02fe08601a8b54c01f7",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-09",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "0d28b87354e4c2d3d480df24064c554791327dce2ac7c2a574a4d7b551f3d8cf",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-10",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "38761047bfed7822289b1950849e36c4b5e3c4123908cfa13f70cee9229283a6",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-11",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "45beb573f0767a6029f12d221559da62590fc5cc46d4585bbb84b58f3858bf91",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-12",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "763d65f14f2f7e15c7d5c6beb91ee8e7ca9d7509430f0a9c92fa67088f4d40a9",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-13",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "577d7022cab0b0a1383b6c5de15c3cfaf369e5907048999ea391a4e90b064cbd",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-wands-14",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "b81f7de83d8e4509cdab71586096fab4050071aef08afd43399beee03f1c48a3",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-01",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "f75e846b67f1aa8eed0bf45cd0fed6b53c8825d4b088e80c060470da61dc23bd",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-02",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "cbce4f792a55cb109a5514eb39dc270ccb15c02b8af18f1eb2fd66e9691def8c",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-03",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "75fedb2dbc7c915ca6f3f5e0912f857a7152905ed2c38da1ce357e397e808998",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-04",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "34d4ae6c77dbb0876eaf6f181e3cb213e7554606e6c1a1bdbe83d26db6692562",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-05",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "d00676ca7ab016fe7ecc3b534111a0d5659c247b5c53c84ffa4450804ea6dab7",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-06",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "1603aec70a72a9701393c43da4a2572f49171c4e368837a3a96b0ea3d4c40941",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-07",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "9e396feb990d9959a95d33187111edd66970b0499c71b81c4f3130c5c65c011e",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-08",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "447bb1ef169d4d8f8c94333d14062f7b8983e6b0dc94c24dfd256e1f474428a1",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-09",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "3d682c89ec7bbd3269904e490563030520881cc54b46490c0ed04fb91f5c11fa",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-10",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "67f3f7c14d59277065ed53892ec9101f567b918dfbb43510780a893e5b712075",
+      "visuallyReviewed": true
+    },
+    {
+      "id": "minor-cups-11",
+      "sourcePng": [
+        1024,
+        1536
+      ],
+      "webp": [
+        768,
+        1152
+      ],
+      "sha256": "9cbcde2a4669de9b51504aaccdbab3cfa829e6cbbb9150405c61ed9bdd143a48",
+      "visuallyReviewed": true
+    }
+  ],
+  "notes": [
+    "All20 cards compared to their public-domain RWS references for subject and symbols.",
+    "Suit counts checked on every numbered card. Eight of Wands corrected from7 to8 rods.",
+    "Six of Wands sun and Seven of Wands snowy mountains removed after QA.",
+    "Original generation prompts and targeted correction prompts retained beside each asset."
+  ]
+}
