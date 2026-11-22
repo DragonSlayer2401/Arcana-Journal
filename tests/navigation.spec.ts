@@ -4,6 +4,30 @@ import type { AppData } from '../src/domain/storage';
 const savedData = (page: Page): Promise<AppData> =>
   page.evaluate(() => JSON.parse(localStorage.getItem('stilllight.tarot.v1')!));
 
+test('Reading and the logo return an open spread to the draw form and keep its journal entry', async ({
+  page,
+}) => {
+  await page.goto('/');
+  const draw = page.getByRole('button', { name: /Draw Cards/ });
+  await draw.click();
+  await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
+  await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(1);
+  const [original] = (await savedData(page)).readings;
+
+  await page.getByRole('link', { name: 'Reading', exact: true }).click();
+  await expect(draw).toBeVisible();
+  await page.getByRole('link', { name: /^Journal/ }).click();
+  await page.getByRole('button', { name: /^Open reading:/ }).click();
+  await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(1);
+
+  await page.getByRole('link', { name: 'Arcana Journal, reading', exact: true }).click();
+  await draw.click();
+  await expect(page.getByRole('button', { name: /^Reveal card/ })).toHaveCount(3);
+  const { readings } = await savedData(page);
+  expect(readings).toHaveLength(2);
+  expect(readings[1]).toEqual(original);
+});
+
 for (const [path, title, navigation] of [
   ['/deck', 'Card library', 'Deck'],
   ['/journal', 'Your reading journal.', 'Journal'],

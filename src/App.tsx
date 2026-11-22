@@ -584,6 +584,12 @@ function JournalSession({
     setCopied(false);
     setError('');
   };
+  const handleReadingLinkClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
+      return;
+    const { activeId, awaitingNewReading } = dataRef.current;
+    if (activeId || awaitingNewReading) newReading();
+  };
   const openReading = (id: string) => {
     commit((current) => ({
       ...current,
@@ -717,7 +723,12 @@ function JournalSession({
     <div className="app-shell">
       <header className="site-header">
         <div className="header-identity">
-          <Link className="wordmark" to="/" aria-label="Arcana Journal, reading">
+          <Link
+            className="wordmark"
+            to="/"
+            aria-label="Arcana Journal, reading"
+            onClick={handleReadingLinkClick}
+          >
             <span className="brand-symbol">
               <Icon name="spark" size={27} />
             </span>
@@ -735,7 +746,7 @@ function JournalSession({
           )}
         </div>
         <nav aria-label="Main navigation">
-          <NavLink className="nav-button" to="/" end>
+          <NavLink className="nav-button" to="/" end onClick={handleReadingLinkClick}>
             <Icon name="cards" />
             <span>Reading</span>
           </NavLink>

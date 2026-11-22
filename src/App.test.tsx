@@ -76,6 +76,29 @@ describe('routed navigation', () => {
     expect(screen.getByRole('link', { name: 'Reading' })).toHaveAttribute('aria-current', 'page');
     expect(random).not.toHaveBeenCalled();
   });
+
+  it('keeps a draft question when returning to the drawing form', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />);
+    await user.type(screen.getByLabelText(/What’s on your mind/), 'An unfinished question');
+    await user.click(screen.getByRole('link', { name: 'Deck' }));
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
+    await user.click(screen.getByRole('link', { name: 'Arcana Journal, reading' }));
+    expect(screen.getByLabelText(/What’s on your mind/)).toHaveValue('An unfinished question');
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('keeps the current spread open on a modified Reading link click', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />);
+    await user.click(drawButton());
+    const original = stored();
+    await user.keyboard('{Control>}');
+    await user.click(screen.getByRole('link', { name: 'Reading' }));
+    await user.keyboard('{/Control}');
+    expect(screen.getByRole('button', { name: 'Reveal card 1' })).toBeVisible();
+    expect(stored()).toEqual(original);
+  });
 });
 
 describe('exploring the card library', () => {
@@ -135,11 +158,11 @@ describe('exploring the card library', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
     expect(stored()).toEqual(original);
     await user.click(screen.getByRole('link', { name: 'Reading' }));
-    expect(screen.getAllByRole('button', { name: /^Reveal card/ })).toHaveLength(2);
-    expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
+    expect(drawButton()).toBeEnabled();
     await user.click(journalButton());
     await user.click(screen.getByRole('button', { name: /^Open reading:/ }));
+    expect(screen.getAllByRole('button', { name: /^Reveal card/ })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(1);
     expect(stored()).toEqual(original);
     expect(random).toHaveBeenCalledTimes(77);
   });
@@ -215,8 +238,6 @@ describe('drawing and revisiting a reading', () => {
     const first = stored().readings[0];
     expect(stored().readings).toHaveLength(1);
     expect(random).toHaveBeenCalledTimes(77);
-    await user.click(journalButton());
-    await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'New Reading' }));
     await user.dblClick(drawButton());
@@ -476,8 +497,6 @@ describe('reading recovery and journal controls', () => {
     expect(stored().activeId).toBeNull();
     expect(screen.getByRole('heading', { name: 'A fresh page awaits.' })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: 'Reading' }));
-    expect(screen.queryByRole('button', { name: /Draw Cards/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'New Reading' }));
     expect(drawButton()).toBeEnabled();
     expect(random).toHaveBeenCalledTimes(154);
   });

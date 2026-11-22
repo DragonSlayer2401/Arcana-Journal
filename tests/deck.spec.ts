@@ -53,7 +53,7 @@ test('the full card library, filters, artwork and both meanings work offline on 
     animations: 'disabled',
   });
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('link', { name: 'Reading', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^Reveal card/ })).toHaveCount(3);
   expect(await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'))).toBe(saved);
+  await page.getByRole('link', { name: 'Reading', exact: true }).click();
+  await expect(page.getByRole('button', { name: /Draw Cards/ })).toBeVisible();
 });
