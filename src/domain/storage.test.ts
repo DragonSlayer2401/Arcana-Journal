@@ -13,7 +13,7 @@ import {
 
 const savedData = (): AppData => ({
   ...freshData(),
-  settings: { mode: 'custom', customCount: 2, reversals: true },
+  settings: { mode: 'custom', customCount: 2, reversals: true, instantReveal: false },
   activeId: 'reading-1',
   readings: [
     {
@@ -40,6 +40,13 @@ describe('local reading persistence', () => {
   it('round trips questions, dates, card order, orientations, reveals, active reading and settings', () => {
     const original = savedData();
     expect(saveData(original)).toBe('');
+    expect(loadData()).toEqual({ data: original, warning: '' });
+  });
+
+  it('retains the reading and spread settings of a journal saved before instant reveal', () => {
+    const original = savedData();
+    const olderSettings = { mode: 'custom', customCount: 2, reversals: true };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...original, settings: olderSettings }));
     expect(loadData()).toEqual({ data: original, warning: '' });
   });
 

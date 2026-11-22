@@ -136,7 +136,7 @@ test('offline readiness detects a lost asset and repairs it when back online', a
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
 });
 
-test('small screens fit a ten-card reversed spread and respect reduced motion', async ({
+test('small screens instantly reveal a ten-card spread with reversals and respect reduced motion', async ({
   page,
 }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -149,8 +149,8 @@ test('small screens fit a ten-card reversed spread and respect reduced motion', 
   await page.getByRole('button', { name: /Custom/ }).click();
   await page.getByRole('combobox', { name: 'Number of cards' }).selectOption('10');
   await page.getByRole('checkbox', { name: /Include reversals/ }).check();
+  await page.getByRole('checkbox', { name: /Reveal cards instantly/ }).check();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
-  await page.getByRole('button', { name: 'Reveal All' }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(10);
   expect(
     new Set((await saved(page)).readings[0].cards.map((card: { cardId: string }) => card.cardId))

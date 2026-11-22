@@ -32,6 +32,7 @@ import {
   freshData,
   guestSaveWarning,
   loadData,
+  readSettings,
   saveData,
   STORAGE_KEY,
   type AppData,
@@ -67,6 +68,10 @@ import { Modal } from './components/Modal';
 import { subscribeOfflineStatus } from './pwa';
 
 const CARD_IDS = Object.freeze(DECK.map((card) => card.id));
+const DRAW_OPTIONS = [
+  { key: 'reversals', label: 'Include reversals', hint: 'Allow upright and reversed cards' },
+  { key: 'instantReveal', label: 'Reveal cards instantly', hint: 'Draw your spread face up' },
+] as const;
 const dateLabel = (date: string) =>
   new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -112,15 +117,7 @@ const loadAccountView = (uid: string) => {
     if (view) {
       if (typeof view.activeId === 'string') data.activeId = view.activeId;
       data.awaitingNewReading = view.awaitingNewReading === true || Boolean(data.activeId);
-      if (
-        ['one', 'three', 'custom'].includes(view.settings?.mode) &&
-        Number.isInteger(view.settings.customCount) &&
-        view.settings.customCount >= 1 &&
-        view.settings.customCount <= 10 &&
-        typeof view.settings.reversals === 'boolean'
-      ) {
-        data.settings = view.settings;
-      }
+      data.settings = readSettings(view.settings) ?? data.settings;
     }
   } catch {
     /* Tab storage is optional. */
@@ -538,7 +535,7 @@ function JournalSession({
         createdAt: new Date().toISOString(),
         question: question.trim(),
         cards,
-        revealed: cards.map(() => false),
+        revealed: cards.map(() => settings.instantReveal),
       };
       if (journalUid) account.saveDraw(result);
       commit((current) => ({
@@ -913,20 +910,20 @@ function JournalSession({
                         <p className="field-hint">
                           A note for your journal. It never influences the draw.
                         </p>
-                        <label className="reversal-setting">
-                          <span>
-                            <strong>Include reversals</strong>
-                            <small>Allow upright and reversed cards</small>
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={data.settings.reversals}
-                            onChange={(event) =>
-                              updateSettings({ reversals: event.target.checked })
-                            }
-                          />
-                          <span className="switch" aria-hidden="true" />
-                        </label>
+                        {DRAW_OPTIONS.map(({ key, label, hint }) => (
+                          <label key={key} className="reading-setting">
+                            <span>
+                              <strong>{label}</strong>
+                              <small>{hint}</small>
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={data.settings[key]}
+                              onChange={(event) => updateSettings({ [key]: event.target.checked })}
+                            />
+                            <span className="switch" aria-hidden="true" />
+                          </label>
+                        ))}
                         {error && (
                           <p className="notice warning" role="alert">
                             {error}
