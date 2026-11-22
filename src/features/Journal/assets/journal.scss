@@ -157,6 +157,27 @@
 .help-disclosure[open] summary {
   margin-bottom: 1rem;
 }
+.noscript-help > p {
+  color: var(--muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+@media (min-width: 960px) {
+  .app-shell > main > .notice {
+    margin: 4px 0;
+    padding: 4px 12px;
+    line-height: 1.4;
+  }
+  .noscript-help {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+  }
+  .help-disclosure {
+    margin: 0;
+  }
+}
 .modal .help-footnote {
   font-size: 0.8125rem;
   color: #a99bb7;
@@ -291,6 +312,18 @@
   .site-header nav {
     width: 100%;
     justify-content: center;
+  }
+}
+@media (min-width: 960px) and (max-height: 800px) {
+  .app-shell {
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+  .site-header {
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: 8px;
+  }
+  .site-footer {
+    padding-top: 4px;
   }
 }
 @media (max-width: 440px) {

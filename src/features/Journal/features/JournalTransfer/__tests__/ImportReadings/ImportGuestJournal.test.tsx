@@ -40,7 +40,7 @@ describe('importing a guest journal into an account', () => {
     mount();
     expect(screen.getByRole('heading', { name: deviceReading.question })).toBeVisible();
     await user.click(within(screen.getByRole('main')).getByRole('link', { name: 'Sign in' }));
-    const form = within(screen.getByRole('main'));
+    const form = within(await screen.findByRole('dialog', { name: 'Sign in' }));
     await user.type(form.getByLabelText('Email address'), firstUser.email);
     await user.type(form.getByLabelText('Password'), 'test-password');
     await user.click(form.getByRole('button', { name: 'Sign in' }));

@@ -27,8 +27,8 @@ test(
     const authenticate = async (page, action) => {
       const signup = action === 'Create account';
       await expect(page).toHaveURL(base + (signup ? '/signup' : '/login'));
-      const form = page.getByRole('main');
-      await expect(form.getByRole('heading', { level: 1, name: action })).toBeVisible();
+      const form = page.getByRole('dialog', { name: action });
+      await expect(form).toBeVisible();
       await form.getByLabel('Email address').fill(email);
       await form.getByLabel('Password', { exact: true }).fill(password);
       if (signup) await form.getByLabel('Confirm password').fill(password);

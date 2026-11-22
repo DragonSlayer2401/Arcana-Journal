@@ -71,7 +71,7 @@ for (const [path, title, navigation] of [
   });
 }
 
-test('account forms open at their own URLs and preserve the guest journal through offline navigation', async ({
+test('account dialogs preserve the guest reading and accept direct visits on a small screen', async ({
   page,
   context,
 }) => {
@@ -86,27 +86,67 @@ test('account forms open at their own URLs and preserve the guest journal throug
     'href',
     '/signup',
   );
-  await header.getByRole('link', { name: 'Sign in' }).click();
+  const signInLink = header.getByRole('link', { name: 'Sign in' });
+  await signInLink.focus();
+  await signInLink.press('Enter');
   await expect(page).toHaveURL('/login');
-  await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
-  const email = page.getByLabel('Email address');
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveAccessibleName('Sign in');
+  await page.keyboard.press('Tab');
+  await expect(dialog.locator(':focus')).toHaveCount(1);
+  const email = dialog.getByLabel('Email address');
   await email.fill('reader@example.test');
-  await page.getByRole('main').getByRole('link', { name: 'Create account' }).click();
+  await dialog.getByRole('link', { name: 'Create account' }).click();
   await expect(page).toHaveURL('/signup');
   await expect(email).toHaveValue('reader@example.test');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL('/');
+  await expect(signInLink).toBeFocused();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   await header.getByRole('link', { name: /^Journal/ }).click();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
-  await header.getByRole('link', { name: 'Create account' }).click();
+  await page
+    .getByRole('region', { name: 'Journal account' })
+    .getByRole('link', { name: 'Create account' })
+    .click();
+  await expect(dialog).toHaveAccessibleName('Create account');
   await expect(email).toHaveValue('');
   await page.reload();
-  await expect(page.getByLabel('Confirm password')).toBeVisible();
+  await expect(dialog.getByLabel('Confirm password')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await context.setOffline(true);
   await page.goto('/reset-password');
+  await expect(dialog).toHaveCount(0);
   await expect(page.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
   await header.getByRole('link', { name: /^Journal/ }).click();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
   expect(await savedJournal(page)).toEqual(original);
+});
+
+test('account dialog history returns to the same filtered deck', async ({ page }) => {
+  await page.goto('/deck');
+  await expect(
+    page.getByRole('button', { name: 'About, installation, and randomness' }),
+  ).toBeEnabled();
+  const search = page.getByLabel('Search cards');
+  await search.fill('King of Cups');
+  await expect(page.getByRole('button', { name: 'King of Cups' })).toBeVisible();
+  const trigger = page.getByRole('banner').getByRole('link', { name: 'Create account' });
+  await trigger.focus();
+  await trigger.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Create account' });
+  await expect(dialog).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL('/deck');
+  await expect(dialog).toHaveCount(0);
+  await expect(search).toHaveValue('King of Cups');
+  await page.goForward();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /close/i }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page).toHaveURL('/deck');
+  await expect(search).toHaveValue('King of Cups');
 });
 
 test('back, forward and offline route refresh preserve one exact saved reading and dismiss dialogs', async ({

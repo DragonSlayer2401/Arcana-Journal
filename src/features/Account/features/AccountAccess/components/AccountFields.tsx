@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import Link from 'next/link';
+import { AccountDialogLink } from './AccountDialogLink';
 import { useRouter } from 'next/navigation';
 import { useJournalSession } from '@/features/Journal/hooks/useJournalSession';
 import { resetPassword, signIn, signUp } from '@/services/Account/account.service';
@@ -89,9 +89,9 @@ export const AccountFields = ({
         <p className="auth-description" role="status">
           If {email.trim()} is eligible for a password reset, check its inbox for a reset link.
         </p>
-        <Link className="button button-secondary" prefetch={false} href="/login">
+        <AccountDialogLink className="button button-secondary" href="/login">
           Back to sign in
-        </Link>
+        </AccountDialogLink>
       </>
     );
   }

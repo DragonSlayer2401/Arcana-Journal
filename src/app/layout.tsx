@@ -24,13 +24,7 @@ const RootLayout = ({ children }: { children: ReactNode }) => {
   return (
     <html lang="en">
       {/* Browser extensions such as Grammarly add body attributes before hydration. */}
-      <body suppressHydrationWarning>
-        {children}
-        <noscript>
-          Arcana Journal needs JavaScript to draw cards securely and keep your readings on this
-          device.
-        </noscript>
-      </body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 };
