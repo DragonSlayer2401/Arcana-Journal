@@ -84,7 +84,9 @@ The source/license record is `art/references/sources.json`, and generation promp
 
 ## Journal accounts and backups
 
-Choose **Sign in** (`/login`) or **Create account** (`/signup`) to access your journal with an email address and password. **Forgot password?** opens the password-reset form (`/reset-password`). New accounts use the guest journal on this device until you follow the verification link in your email and choose **Check verification** in Journal. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
+Choose **Sign in** (`/login`) or **Create account** (`/signup`) to open a dialog over your current screen. Close it or press Escape to return to your reading, Deck filters, or Journal. Opening either address directly shows the dialog over Journal. **Forgot password?** switches the dialog to password reset, and `/reset-password` also opens as a standalone form.
+
+New accounts use the guest journal on this device until you follow the verification link in your email and choose **Check verification** in Journal. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
 
 On a trusted device, choose **Lock journal** on the Journal page and wait for **Journal locked** before handing it over. A saved lock covers the app’s other tabs and survives reopening the browser. If the browser cannot save the lock, the lock screen tells you that only this tab is locked. Use your device’s screen lock before handing it over in that case. Firebase keeps the account signed in so its queued changes can sync. Anyone with access to the browser profile’s stored data can still read the local cache.
 

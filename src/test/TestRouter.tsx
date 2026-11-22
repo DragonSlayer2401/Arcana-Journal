@@ -1,5 +1,4 @@
-import { useState, type ReactNode } from 'react';
-import { usePathname } from 'next/navigation';
+import { createContext, useContext, useLayoutEffect, useState, type ReactNode } from 'react';
 import {
   AppRouterContext,
   type AppRouterInstance,
@@ -13,6 +12,7 @@ import AccountLayout from '../app/(journal)/(account)/layout';
 import Login from '../app/(journal)/(account)/login/page';
 import Signup from '../app/(journal)/(account)/signup/page';
 import ResetPassword from '../app/(journal)/(account)/reset-password/page';
+import { NativeNavigationContext } from './TestLink';
 
 const pages = new Map([
   ['/', Reading],
@@ -22,9 +22,10 @@ const pages = new Map([
   ['/signup', Signup],
   ['/reset-password', ResetPassword],
 ]);
+const RenderedRouteContext = createContext('/');
+
 export const TestApp = () => {
-  const pathname = usePathname();
-  const Page = pages.get(pathname)!;
+  const Page = pages.get(useContext(RenderedRouteContext))!;
   const isAccountPage = Page === Login || Page === Signup || Page === ResetPassword;
   return (
     <JournalShell>
@@ -39,21 +40,52 @@ export const TestApp = () => {
   );
 };
 
-// Each mounted app gets its own URL, like two separate browser tabs.
+interface TestRoute {
+  path: string;
+  renderedRoute: string;
+  state: unknown;
+}
+
 export const TestRouter = ({ children, path = '/' }: { children: ReactNode; path?: string }) => {
-  const [pathname, setPath] = useState(path);
+  const [routes, setRoutes] = useState<TestRoute[]>([{ path, renderedRoute: path, state: null }]);
+  const [position, setPosition] = useState(0);
+  const current = routes[position];
+  // Each mounted test app owns its history. Native navigation keeps its current page mounted.
+  useLayoutEffect(() => {
+    window.history.replaceState(current.state, '', current.path);
+  }, [current]);
+  const navigate = (next: TestRoute, replace: boolean) => {
+    if (replace) {
+      const updated = [...routes];
+      updated[position] = next;
+      setRoutes(updated);
+    } else {
+      setRoutes([...routes.slice(0, position + 1), next]);
+      setPosition(position + 1);
+    }
+  };
+  const navigatePage = (path: string, replace: boolean) =>
+    navigate({ path, renderedRoute: path, state: null }, replace);
+  const navigateNative = (path: string, replace: boolean) =>
+    navigate({ path, renderedRoute: current.renderedRoute, state: window.history.state }, replace);
   const router: AppRouterInstance = {
-    push: setPath,
-    replace: setPath,
+    push: (path) => navigatePage(path, false),
+    replace: (path) => navigatePage(path, true),
     refresh() {},
     prefetch() {},
-    back() {},
-    forward() {},
-    bfcacheId: pathname,
+    back: () => setPosition(Math.max(0, position - 1)),
+    forward: () => setPosition(Math.min(routes.length - 1, position + 1)),
+    bfcacheId: current.path,
   };
   return (
     <AppRouterContext.Provider value={router}>
-      <PathnameContext.Provider value={pathname}>{children}</PathnameContext.Provider>
+      <PathnameContext.Provider value={current.path}>
+        <NativeNavigationContext.Provider value={navigateNative}>
+          <RenderedRouteContext.Provider value={current.renderedRoute}>
+            {children}
+          </RenderedRouteContext.Provider>
+        </NativeNavigationContext.Provider>
+      </PathnameContext.Provider>
     </AppRouterContext.Provider>
   );
 };

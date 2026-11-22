@@ -1,11 +1,34 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useJournalSession } from '@/features/Journal/hooks/useJournalSession';
 import { readingDateLabel } from '@/features/Journal/utils/readingDate';
 import { ReadingSpread } from './ReadingSpread';
 import { ShareReading } from './ShareReading';
 import { Icon } from '@/components/Icon';
+import { Modal } from '@/components/Modal';
+
+const ReadingQuestion = ({ question }: { question: string }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const hasLongQuestion = question.length > 80 || /[\t\r\n]/.test(question);
+  return (
+    <>
+      <p className="reading-question">
+        <span>{question || 'An open reading. A little space to listen.'}</span>
+        {hasLongQuestion && (
+          <button className="question-detail" onClick={() => setIsOpen(true)}>
+            Read full question
+          </button>
+        )}
+      </p>
+      {isOpen && (
+        <Modal title="Your question" onClose={() => setIsOpen(false)}>
+          <p className="full-reading-question">{question}</p>
+        </Modal>
+      )}
+    </>
+  );
+};
 
 export const ReadingWorkspace = ({
   children,
@@ -41,7 +64,11 @@ export const ReadingWorkspace = ({
           </button>
         </section>
       )}
-      {!reading && !data.awaitingNewReading && children}
+      {!reading && !data.awaitingNewReading && (
+        <section className="reading-home" aria-label="Prepare your reading">
+          {children}
+        </section>
+      )}
       {reading && (
         <section key={reading.id} className="reading-result" aria-label="Your reading">
           <div className="result-heading">
@@ -51,9 +78,7 @@ export const ReadingWorkspace = ({
                 {reading.cards.length === 1 ? 'CARD' : 'CARDS'}
               </p>
               <h1>Your moment, drawn.</h1>
-              <p className="reading-question">
-                {reading.question || 'An open reading. A little space to listen.'}
-              </p>
+              <ReadingQuestion question={reading.question} />
             </div>
             <button className="button button-secondary" onClick={newReading}>
               <Icon name="spark" />
@@ -76,9 +101,7 @@ export const ReadingWorkspace = ({
           </div>
           <ReadingSpread reading={reading} cardBack={cardBack} onReveal={reveal} />
           <ShareReading reading={reading} />
-          <p className="reflection-note">
-            {journalUid ? account.status : 'A prompt for reflection. You decide what resonates.'}
-          </p>
+          {journalUid && <p className="reflection-note">{account.status}</p>}
         </section>
       )}
     </>

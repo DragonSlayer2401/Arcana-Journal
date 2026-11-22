@@ -1,9 +1,79 @@
-import { expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from '@playwright/test';
 import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import { savedJournal } from '@/test/browser/journal';
+import { desktopViewports, expectPageToFit } from '@/test/browser/viewport';
 
 const noOverflow = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+test.describe('desktop reading layout', () => {
+  test.skip(({ isMobile }) => isMobile);
+
+  for (const viewport of desktopViewports) {
+    test(`draw and reveal spreads without scrolling at ${viewport.width} × ${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/');
+      await expectPageToFit(page);
+
+      const question = 'What deserves attention today?\n'.repeat(60).trim();
+      for (const count of [1, 3, 6, 10]) {
+        await page.getByRole('button', { name: /Custom/ }).click();
+        await page.getByRole('combobox', { name: 'Number of cards' }).selectOption(String(count));
+        await page.getByLabel('What’s on your mind?').fill(question);
+        await expectPageToFit(page);
+        await page.getByRole('button', { name: /Draw Cards/ }).click();
+        await expect(page.getByRole('button', { name: /^Reveal card \d+$/ })).toHaveCount(count);
+        await expectPageToFit(page);
+        await page.getByRole('button', { name: 'Reveal All' }).click();
+        await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(count);
+        await expectPageToFit(page);
+        if (count === 10) {
+          await page.getByRole('button', { name: 'Read full question' }).click();
+          await expect(page.getByRole('dialog', { name: 'Your question' })).toContainText(question);
+          await page.getByRole('button', { name: 'Close dialog' }).click();
+        }
+        await page.getByRole('button', { name: 'New Reading' }).click();
+      }
+      await page.evaluate(() => {
+        Object.defineProperty(window.crypto, 'getRandomValues', { value: undefined });
+      });
+      await page.getByRole('button', { name: /Draw Cards/ }).click();
+      await expect(page.getByRole('main').getByRole('alert')).toContainText('No cards were drawn');
+      await expectPageToFit(page);
+    });
+  }
+});
+
+test.describe('iPad landscape reading form', () => {
+  const iPad = devices['iPad Pro 11 landscape'];
+  test.use({
+    userAgent: iPad.userAgent,
+    deviceScaleFactor: iPad.deviceScaleFactor,
+    screen: iPad.viewport,
+    viewport: { width: 1194, height: 715 },
+  });
+  test.skip(({ browserName }) => browserName !== 'webkit');
+
+  test('uses the available height for default and custom spreads', async ({ page }) => {
+    await page.goto('/');
+    const question = page.getByLabel('What’s on your mind?');
+    await question.fill('A question\nA reflection\nAn intention');
+    expect(await question.evaluate((field) => field.scrollHeight - field.clientHeight)).toBe(0);
+
+    for (const spread of [/Three cards/, /Custom/]) {
+      await page.getByRole('button', { name: spread }).click();
+      await expectPageToFit(page);
+      const gapBelowForm = await page.locator('form').evaluate((form) => {
+        const footer = document.querySelector('footer')!;
+        return footer.getBoundingClientRect().top - form.getBoundingClientRect().bottom;
+      });
+      expect(gapBelowForm).toBeGreaterThanOrEqual(0);
+      expect(gapBelowForm).toBeLessThanOrEqual(48);
+    }
+  });
+});
 
 test('mobile layout, reveal, details, journal and reload retain the saved result', async ({
   page,

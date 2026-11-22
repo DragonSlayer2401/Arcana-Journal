@@ -70,12 +70,8 @@ export const JournalHistory = ({ emptyState }: { emptyState: ReactNode }) => {
           Load older readings
         </button>
       )}
-      {!opening && (
-        <p className="reflection-note">
-          {journalUid
-            ? 'Your account journal syncs across your signed-in devices.'
-            : 'Stored only in this browser or installed app. Clearing its data can erase your journal.'}
-        </p>
+      {journalUid && (
+        <p className="reflection-note">Your account journal syncs across your signed-in devices.</p>
       )}
     </>
   );

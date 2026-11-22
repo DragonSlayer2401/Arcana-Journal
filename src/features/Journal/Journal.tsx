@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import JournalProvider from './components/JournalProvider';
 import { Icon } from '@/components/Icon';
+import { AccountDialogHost } from '@/features/Account/features/AccountAccess/components/AccountDialogHost';
+import { AccountDialogLink } from '@/features/Account/features/AccountAccess/components/AccountDialogLink';
 import {
   AboutButton,
   HeaderLink,
@@ -14,7 +16,7 @@ import { JournalDialogs } from './components/JournalDialogs';
 const Journal = ({ children }: { children: ReactNode }) => {
   return (
     <JournalProvider>
-      <div className="app-shell">
+      <AccountDialogHost className="app-shell">
         <header className="site-header">
           <div className="header-identity">
             <HeaderLink
@@ -32,10 +34,10 @@ const Journal = ({ children }: { children: ReactNode }) => {
               </span>
             </HeaderLink>
             <SignedOutLinks>
-              <HeaderLink href="/login">Sign in</HeaderLink>
-              <HeaderLink className="header-signup" href="/signup">
+              <AccountDialogLink href="/login">Sign in</AccountDialogLink>
+              <AccountDialogLink className="header-signup" href="/signup">
                 Create account
-              </HeaderLink>
+              </AccountDialogLink>
             </SignedOutLinks>
           </div>
           <nav aria-label="Main navigation">
@@ -64,13 +66,19 @@ const Journal = ({ children }: { children: ReactNode }) => {
           <OfflineStatus />
         </footer>
         <noscript>
-          <details className="help-disclosure">
-            <summary>About Arcana Journal</summary>
-            {helpContent}
-          </details>
+          <div className="noscript-help">
+            <p>
+              Arcana Journal needs JavaScript to draw cards securely and keep your readings on this
+              device.
+            </p>
+            <details className="help-disclosure">
+              <summary>About Arcana Journal</summary>
+              {helpContent}
+            </details>
+          </div>
         </noscript>
         <JournalDialogs>{helpContent}</JournalDialogs>
-      </div>
+      </AccountDialogHost>
     </JournalProvider>
   );
 };

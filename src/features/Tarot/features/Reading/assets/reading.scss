@@ -1,3 +1,6 @@
+.reading-home {
+  margin-bottom: 24px;
+}
 .intro {
   text-align: center;
   padding-top: 52px;
@@ -285,23 +288,6 @@
   text-align: center;
   margin: 13px 0 0;
 }
-.principles {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 35px;
-  margin: 40px 0 38px;
-  color: #aaa2b7;
-  font-size: 0.75rem;
-}
-.principles span {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.principles svg {
-  color: #b39c73;
-}
 .reading-result {
   padding: 55px 0 35px;
 }
@@ -440,16 +426,15 @@
   font-size: 0.8125rem;
   color: #aaa0b7;
 }
+.reading-actions > span:empty {
+  position: absolute;
+}
 @media (min-width: 1300px) {
   .intro {
     padding-top: 60px;
   }
   .reading-workspace {
     margin-top: 45px;
-  }
-  .principles {
-    margin-top: 44px;
-    margin-bottom: 44px;
   }
 }
 @media (max-width: 800px) {
@@ -494,10 +479,6 @@
     font-size: 0.55rem;
     letter-spacing: 0.1em;
     bottom: 22px;
-  }
-  .principles {
-    gap: 21px;
-    font-size: 0.6875rem;
   }
   .spread-grid {
     gap: 18px;
@@ -613,14 +594,6 @@
   .draw-note {
     font-size: 0.6875rem;
   }
-  .principles {
-    display: grid;
-    gap: 15px;
-    margin: 28px auto;
-    font-size: 0.75rem;
-    justify-content: start;
-    width: max-content;
-  }
   .reading-result {
     padding: 35px 0 30px;
   }
@@ -708,7 +681,6 @@
 .question-label,
 .custom-count,
 .reading-setting strong,
-.principles,
 .card-underlabel,
 .reveal-bar p,
 .reading-actions > span {
@@ -755,9 +727,6 @@
   }
   .card-front > svg {
     height: 73%;
-  }
-  .principles {
-    font-size: 0.875rem;
   }
   .mode-option small {
     font-size: 0.75rem;
@@ -847,4 +816,252 @@
 .copy-fallback {
   font-family: monospace;
   font-size: 1rem;
+}
+
+.question-detail {
+  display: none;
+}
+.full-reading-question {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.draw-error {
+  grid-column: 2;
+  width: 100%;
+  margin: 0;
+}
+
+@media (min-width: 960px) {
+  main:has(> .reading-home) {
+    display: flex;
+    flex-direction: column;
+  }
+  .reading-home {
+    flex: auto;
+    display: grid;
+    grid-template:
+      'intro form' auto
+      'preview form' 1fr
+      'error form' auto / minmax(0, 1fr) minmax(0, 1.15fr);
+    align-items: center;
+    column-gap: clamp(24px, 4vw, 64px);
+    width: min(100%, 1060px);
+    margin: clamp(24px, 4svh, 40px) auto;
+  }
+  main > .notice ~ .reading-home {
+    margin-block: 4px;
+  }
+  .reading-workspace {
+    display: contents;
+  }
+  .draw-error {
+    grid-area: error;
+    margin-top: 8px;
+  }
+  .intro {
+    grid-area: intro;
+    padding: 0;
+  }
+  .intro .eyebrow,
+  .intro h1 {
+    margin-bottom: 12px;
+  }
+  .intro > p:last-child {
+    margin: 0;
+  }
+  .deck-preview {
+    grid-area: preview;
+    height: clamp(200px, 36svh, 380px);
+  }
+  .reading-home:has(.draw-error) .deck-preview {
+    height: clamp(180px, 30svh, 320px);
+  }
+  .orbital {
+    width: auto;
+    aspect-ratio: 1;
+  }
+  .orbital-one {
+    height: 80%;
+  }
+  .orbital-two {
+    height: 90%;
+  }
+  .preview-card {
+    width: auto;
+    height: 59%;
+    aspect-ratio: 190 / 269;
+    top: 17%;
+  }
+  .deck-caption {
+    bottom: 0;
+    margin: 0;
+  }
+  .reading-form {
+    grid-area: form;
+    align-self: stretch;
+    display: grid;
+    align-content: space-between;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 18px;
+    padding: clamp(16px, 2.5svh, 28px);
+  }
+  .reading-form > :not(.reading-setting) {
+    grid-column: 1 / -1;
+  }
+  .reading-setting {
+    gap: 8px;
+    padding: 0 0 12px;
+  }
+  .switch {
+    flex-shrink: 0;
+  }
+  .reading-result {
+    --spread-card-width: clamp(105px, calc(45svh - 188px), 270px);
+    display: grid;
+    grid-template:
+      'title new-reading' auto
+      'title reveal' auto
+      'spread spread' auto
+      'actions note' auto / minmax(0, 1fr) auto;
+    align-items: center;
+    row-gap: clamp(8px, 1.5svh, 18px);
+    column-gap: 20px;
+    padding: clamp(24px, 4svh, 40px) 0 clamp(4px, 1svh, 12px);
+  }
+  main > .notice ~ .reading-result {
+    --spread-card-width: clamp(90px, calc(45svh - 205px), 250px);
+    padding-block: 2px;
+    row-gap: 4px;
+  }
+  .reading-result .result-heading {
+    display: contents;
+  }
+  .reading-result .result-heading > div {
+    grid-area: title;
+  }
+  .reading-result .result-heading > .button {
+    grid-area: new-reading;
+    justify-self: end;
+  }
+  .reading-result .result-heading .eyebrow {
+    margin-bottom: 0;
+  }
+  .reading-result h1 {
+    margin-bottom: 4px;
+  }
+  .reading-question:has(.question-detail) {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .reading-question:has(.question-detail) > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .question-detail {
+    display: inline-block;
+    flex-shrink: 0;
+    min-height: 24px;
+    padding: 2px;
+    background: transparent;
+    color: var(--gold);
+    font-size: 0.875rem;
+    text-decoration: underline;
+  }
+  .reveal-bar {
+    grid-area: reveal;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    justify-content: flex-end;
+  }
+  .spread-grid,
+  .spread-grid.single-card {
+    grid-area: spread;
+    width: 100%;
+    max-width: none;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, var(--spread-card-width));
+    justify-content: center;
+    gap: clamp(8px, 1vw, 18px);
+  }
+  .position-label {
+    margin-bottom: 4px;
+  }
+  .card-caption {
+    min-height: 56px;
+    padding: 6px;
+    gap: 4px;
+  }
+  .card-caption strong {
+    font-size: clamp(1rem, 2svh, 1.25rem);
+  }
+  .card-underlabel {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+  }
+  .reading-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+    margin: 0;
+  }
+  .reading-result .reflection-note {
+    grid-area: note;
+    margin: 0;
+    text-align: end;
+  }
+}
+
+@media (min-width: 960px) and (min-height: 960px) {
+  .reading-home {
+    flex: none;
+    min-height: 44rem;
+  }
+}
+
+@media (min-width: 960px) and (max-height: 800px) {
+  .reading-result {
+    row-gap: 6px;
+    padding-block: 24px 4px;
+  }
+  .reading-result h1 {
+    font-size: 2.45rem;
+  }
+  .reading-home {
+    margin-block: 24px;
+  }
+  .intro h1 {
+    font-size: 2.8rem;
+  }
+  .form-heading,
+  .mode-options,
+  .custom-count {
+    margin-bottom: 10px;
+  }
+  .reading-form legend,
+  .question-label {
+    margin-bottom: 6px;
+  }
+  .mode-option {
+    padding-block: 8px;
+    gap: 3px;
+  }
+  .reading-form textarea {
+    min-height: auto;
+    padding-block: 8px;
+  }
+  main > .notice ~ .reading-home textarea {
+    height: 3.75rem;
+  }
+  .reading-form .field-hint {
+    margin: 4px 0 8px;
+  }
+  .reading-setting {
+    min-height: 50px;
+  }
+  .draw-note {
+    margin-top: 6px;
+  }
 }

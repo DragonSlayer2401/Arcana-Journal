@@ -19,11 +19,9 @@ describe('creating an account', () => {
     mount('/');
     const signInLink = within(screen.getByRole('banner')).getByRole('link', { name: 'Sign in' });
     await user.click(signInLink);
-    expect(screen.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
-    await user.click(
-      within(screen.getByRole('main')).getByRole('link', { name: 'Create account' }),
-    );
-    expect(screen.getByRole('heading', { level: 1, name: 'Create account' })).toBeVisible();
+    const signIn = within(await screen.findByRole('dialog', { name: 'Sign in' }));
+    await user.click(signIn.getByRole('link', { name: 'Create account' }));
+    expect(await screen.findByRole('dialog', { name: 'Create account' })).toBeVisible();
     await user.type(screen.getByLabelText('Email address'), firstUser.email);
     await user.type(screen.getByLabelText('Password', { exact: true }), 'test-password');
     const confirmation = screen.getByLabelText('Confirm password');

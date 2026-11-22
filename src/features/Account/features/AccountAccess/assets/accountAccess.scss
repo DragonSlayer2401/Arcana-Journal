@@ -45,3 +45,115 @@
   font-size: 0.9375rem;
   text-underline-offset: 0.2em;
 }
+
+.auth-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  background: #090712c9;
+  backdrop-filter: blur(6px);
+}
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.auth-modal-dialog {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100%;
+  width: min(calc(100% - 2rem), 32rem);
+  margin: auto;
+  padding-block: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-bottom));
+  pointer-events: none;
+}
+
+.auth-modal-content {
+  padding: clamp(1.25rem, 3svh, 2rem);
+  border: 1px solid #d7bc8345;
+  border-radius: 16px;
+  background: linear-gradient(150deg, #282033, var(--panel));
+  box-shadow: 0 26px 90px #06040dc4;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+
+.auth-modal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.auth-modal-heading h1 {
+  margin: 0;
+  font-size: clamp(2.25rem, 5svh, 3rem);
+}
+
+.auth-modal-heading .icon-button {
+  border: 1px solid var(--line);
+}
+
+.auth-modal .auth-description {
+  margin-bottom: 1rem;
+}
+
+.auth-modal .auth-form .notice {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.auth-form input:focus-visible {
+  outline-offset: 2px;
+}
+
+@media (min-width: 960px) {
+  .auth-page {
+    max-width: 32rem;
+    margin-block: clamp(0.5rem, 1.5svh, 1rem);
+    padding: clamp(1rem, 2.5svh, 1.5rem);
+  }
+
+  .auth-page h1 {
+    font-size: clamp(2.25rem, 5svh, 3rem);
+  }
+
+  .auth-page .auth-description {
+    margin-bottom: 1rem;
+  }
+}
+
+@media (min-width: 960px) and (max-height: 800px) {
+  .auth-page {
+    margin-block: 0.25rem;
+    padding-block: 0.75rem;
+  }
+
+  .auth-page,
+  .auth-modal-content {
+    .auth-form {
+      gap: 0.25rem;
+    }
+
+    .auth-fields label:not(:first-child),
+    .auth-form [type='submit'],
+    .auth-links {
+      margin-top: 0.25rem;
+    }
+
+    .auth-description {
+      margin-bottom: 0.5rem;
+    }
+  }
+
+  .auth-page .auth-form .notice {
+    margin: 0;
+    padding: 0.25rem 0.75rem;
+  }
+}

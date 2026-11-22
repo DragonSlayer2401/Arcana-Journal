@@ -91,7 +91,7 @@ export const QuestionInput = () => {
 };
 
 export const DrawControls = () => {
-  const { opening, data, updateSettings, error } = useJournalSession();
+  const { opening, data, updateSettings } = useJournalSession();
   return (
     <>
       {drawOptions.map(({ key, label, hint }) => (
@@ -109,11 +109,6 @@ export const DrawControls = () => {
           <span className="switch" aria-hidden="true" />
         </label>
       ))}
-      {error && (
-        <p className="notice warning" role="alert">
-          {error}
-        </p>
-      )}
       <button disabled={opening} type="submit" className="button button-gold draw-button">
         <Icon name="spark" /> Draw Cards{' '}
         <span className="button-count">{getSpreadCount(data.settings)}</span>
@@ -122,7 +117,11 @@ export const DrawControls = () => {
   );
 };
 
-export const JournalScope = () => {
-  const { journalUid } = useJournalSession();
-  return journalUid ? 'Your synced reading journal' : 'A journal on your device';
+export const DrawError = () => {
+  const { error } = useJournalSession();
+  return error ? (
+    <p className="draw-error notice warning" role="alert">
+      {error}
+    </p>
+  ) : null;
 };
