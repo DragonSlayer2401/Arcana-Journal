@@ -30,4 +30,5 @@ export interface Settings {
   mode: 'one' | 'three' | 'custom';
   customCount: number;
   reversals: boolean;
+  instantReveal: boolean;
 }

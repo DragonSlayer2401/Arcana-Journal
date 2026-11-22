@@ -393,6 +393,27 @@ describe('account journal workflows', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe(guestBefore);
   });
 
+  it('saves an instantly revealed account spread in the initial draw', async () => {
+    const user = userEvent.setup();
+    signedIn = firstUser;
+    cloud.createReading.mockImplementation(async (uid, entry) =>
+      publish(uid, [entry, ...records.get(uid)!]),
+    );
+    const app = mount('/');
+    await user.click(screen.getByRole('checkbox', { name: /Reveal cards instantly/ }));
+    app.unmount();
+    mount('/');
+    expect(screen.getByRole('checkbox', { name: /Reveal cards instantly/ })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: /Draw Cards/ }));
+
+    expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(3);
+    expect(cloud.createReading).toHaveBeenCalledWith(
+      firstUser.uid,
+      expect.objectContaining({ revealed: [true, true, true] }),
+    );
+    expect(cloud.revealCards).not.toHaveBeenCalled();
+  });
+
   it('dismisses a pending delete when a sibling locks the journal', async () => {
     const user = userEvent.setup();
     signedIn = firstUser;

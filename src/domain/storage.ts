@@ -13,11 +13,25 @@ export interface AppData {
 }
 export const freshData = (): AppData => ({
   version: 1,
-  settings: { mode: 'three', customCount: 5, reversals: false },
+  settings: { mode: 'three', customCount: 5, reversals: false, instantReveal: false },
   readings: [],
   activeId: null,
   awaitingNewReading: false,
 });
+export const readSettings = (value: unknown): Settings | null => {
+  const settings = value as Settings | null;
+  if (
+    !settings ||
+    !['one', 'three', 'custom'].includes(settings.mode) ||
+    !Number.isInteger(settings.customCount) ||
+    settings.customCount < 1 ||
+    settings.customCount > 10 ||
+    typeof settings.reversals !== 'boolean'
+  ) {
+    return null;
+  }
+  return { ...settings, instantReveal: settings.instantReveal === true };
+};
 export const isReading = (value: unknown): value is Reading => {
   if (!value || typeof value !== 'object') return false;
   const r = value as Reading;
@@ -41,23 +55,19 @@ export const isReading = (value: unknown): value is Reading => {
 };
 const parseSavedData = (raw: string): AppData => {
   const parsed = JSON.parse(raw) as AppData;
+  const settings = readSettings(parsed.settings);
   if (
     parsed.version !== 1 ||
     !Array.isArray(parsed.readings) ||
     !parsed.readings.every(isReading) ||
     new Set(parsed.readings.map((r) => r.id)).size !== parsed.readings.length ||
-    !parsed.settings ||
-    !['one', 'three', 'custom'].includes(parsed.settings.mode) ||
-    !Number.isInteger(parsed.settings.customCount) ||
-    parsed.settings.customCount < 1 ||
-    parsed.settings.customCount > 10 ||
-    typeof parsed.settings.reversals !== 'boolean' ||
+    !settings ||
     typeof parsed.awaitingNewReading !== 'boolean' ||
     !(parsed.activeId === null || parsed.readings.some((r) => r.id === parsed.activeId))
   ) {
     throw new Error('Invalid saved data');
   }
-  return parsed;
+  return { ...parsed, settings };
 };
 
 // Most writes follow a successful read or write in this tab. Recheck the shape

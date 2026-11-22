@@ -226,6 +226,34 @@ describe('drawing and revisiting a reading', () => {
     expect(random).toHaveBeenCalledTimes(154);
   });
 
+  it('draws face-up cards immediately and remembers the choice until it is turned off', async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<App />);
+    const instantReveal = () => screen.getByRole('checkbox', { name: /Reveal cards instantly/ });
+    expect(instantReveal()).not.toBeChecked();
+    await user.click(instantReveal());
+    await user.click(drawButton());
+
+    const first = stored().readings[0];
+    expect(first.revealed).toEqual([true, true, true]);
+    expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(3);
+    const card = CARD_BY_ID.get(first.cards[0].cardId)!;
+    await user.click(
+      screen.getByRole('button', { name: `${card.name}, upright. View card details` }),
+    );
+    expect(screen.getByRole('dialog', { name: card.name })).toHaveTextContent(card.upright.meaning);
+
+    view.unmount();
+    renderApp(<App />);
+    await user.click(screen.getByRole('button', { name: 'New Reading' }));
+    expect(instantReveal()).toBeChecked();
+    await user.click(instantReveal());
+    await user.click(drawButton());
+    expect(screen.getAllByRole('button', { name: /^Reveal card/ })).toHaveLength(3);
+    expect(stored().readings[0].revealed).toEqual([false, false, false]);
+    expect(stored().readings[1]).toEqual(first);
+  });
+
   it('draws a custom spread with independent saved reversals and retains settings after restart', async () => {
     const user = userEvent.setup();
     const random = useSecureSamples((index) => (index < 77 ? 0 : (index - 77) % 2));
