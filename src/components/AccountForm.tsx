@@ -67,7 +67,7 @@ const AccountFields = ({
         cause &&
         typeof cause === 'object' &&
         'code' in cause &&
-        cause.code === 'auth/user-not-found'
+        (cause.code === 'auth/user-not-found' || cause.code === 'auth/user-disabled')
       ) {
         setResetSent(true);
       } else {
@@ -82,7 +82,7 @@ const AccountFields = ({
     return (
       <>
         <p className="auth-description" role="status">
-          If an account uses {email.trim()}, you’ll receive a password reset email.
+          If {email.trim()} is eligible for a password reset, check its inbox for a reset link.
         </p>
         <Link className="button button-secondary" to="/login">
           Back to sign in

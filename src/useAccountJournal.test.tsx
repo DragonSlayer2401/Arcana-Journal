@@ -139,7 +139,7 @@ describe('recovering rejected journal writes', () => {
       });
       expect(JSON.parse(json)).toEqual({
         version: 1,
-        readings: [{ ...draw, revealed: [false, true] }],
+        readings: [{ ...draw, createdAt: '2026-10-02T11:11:11.000Z', revealed: [false, true] }],
       });
       expect(onExport).not.toHaveBeenCalled();
       await user.click(screen.getByRole('button', { name: 'Confirm discard' }));
@@ -356,7 +356,9 @@ describe('recovery copies on a trusted browser', () => {
     const { result } = renderHook(() => useAccountJournal('tester', first.id));
     await act(async () => result.current.remove(first.id));
     expect(localStorage.getItem(key)).not.toBeNull();
-    expect(result.current.savedRecovery.readings).toEqual([{ ...source, id: assigned.id }]);
+    expect(result.current.savedRecovery.readings).toEqual([
+      { ...source, id: assigned.id, sourceId: source.id },
+    ]);
   });
 
   it('waits for the original reading to acknowledge a reveal already present on its alternate', async () => {
@@ -402,7 +404,7 @@ describe('recovery copies on a trusted browser', () => {
     saveRecoveryCopy('tester', original);
     trustedCache([draw, alternate]);
     const { result } = renderHook(() => useAccountJournal('tester', draw.id));
-    const expected = [original, { ...imported, id: alternate.id }];
+    const expected = [original, { ...imported, id: alternate.id, sourceId: imported.id }];
     act(() => {
       for (const readings of [
         result.current.savedRecovery.readings,
@@ -418,7 +420,7 @@ describe('recovery copies on a trusted browser', () => {
     'preserves the assigned reveal in a full backup when its destination is absent or replaced (replaced: %s)',
     async (replaced) => {
       const pending = { ...draw, revealed: [true, false] };
-      const assigned = { ...pending, id: await collisionReadingId(draw) };
+      const assigned = { ...pending, id: await collisionReadingId(draw), sourceId: draw.id };
       const occupant = { ...draw, id: assigned.id, question: 'A new reading at that ID' };
       const independent = { ...draw, id: await collisionReadingId(draw, 100) };
       const cloud = replaced ? [draw, occupant, independent] : [draw, independent];
@@ -437,9 +439,10 @@ describe('recovery copies on a trusted browser', () => {
         exported.readings,
         exported.assignedIds,
       );
-      const targetId = replaced ? await collisionReadingId(assigned) : assigned.id;
+      const targetId = replaced ? assigned.id + '-1' : assigned.id;
       expect(readings).toHaveLength(cloud.length + 1);
-      expect(readings).toEqual(expect.arrayContaining([...cloud, { ...assigned, id: targetId }]));
+      const portable = { ...assigned, id: targetId };
+      expect(readings).toEqual(expect.arrayContaining([...cloud, portable]));
       if (replaced) {
         await importTargetRecorder(loadRecoveryCopies('tester').copies, assigned)(targetId);
         expect(recovery.isCurrent()).toBe(false);
@@ -473,7 +476,9 @@ describe('recovery copies on a trusted browser', () => {
     async (assigned) => {
       trustedCache([]);
       const key = saveRecoveryCopy('tester', draw);
-      const target = assigned ? { ...draw, id: await collisionReadingId(draw) } : draw;
+      const target = assigned
+        ? { ...draw, id: await collisionReadingId(draw), sourceId: draw.id }
+        : draw;
       if (assigned)
         await importTargetRecorder(loadRecoveryCopies('tester').copies, draw)(target.id);
       const first = renderHook(() => useAccountJournal('tester', null));
@@ -540,7 +545,7 @@ describe('recovery copies on a trusted browser', () => {
     act(() => {
       retained = current.result.current.savedRecovery.retainUntilChecked();
     });
-    const assigned = { ...draw, id: await collisionReadingId(draw) };
+    const assigned = { ...draw, id: await collisionReadingId(draw), sourceId: draw.id };
     await importTargetRecorder(retained.copies, draw)(assigned.id);
     expect(stalePreview.isCurrent()).toBe(false);
     act(() => window.dispatchEvent(new Event('focus')));
@@ -613,7 +618,7 @@ describe('recovery copies on a trusted browser', () => {
   it('keeps a tab-only unchecked recovery with its account until explicit discard', async () => {
     const owner = 'restricted-recovery';
     const key = saveTabRecoveryCopy(owner, draw);
-    const target = { ...draw, id: await collisionReadingId(draw) };
+    const target = { ...draw, id: await collisionReadingId(draw), sourceId: draw.id };
     await importTargetRecorder(loadRecoveryCopies(owner).copies, draw)(target.id);
     const current = renderHook(() => useAccountJournal(owner, null));
     act(() => current.result.current.savedRecovery.retainUntilChecked());
@@ -930,7 +935,9 @@ describe('recovery copies on a trusted browser', () => {
     expect(loadRecoveryCopies('tester').prepared).toEqual([
       { key, reading: reveal, importedAs: assignedId, targetId: null },
     ]);
-    expect(result.current.recoveryReadings).toEqual([{ ...reveal, id: assignedId }]);
+    expect(result.current.recoveryReadings).toEqual([
+      { ...reveal, id: assignedId, sourceId: reveal.id },
+    ]);
   });
 
   it('withdraws a confirmed deletion before acknowledgement and restores its copy after rejection', async () => {

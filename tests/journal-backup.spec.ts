@@ -11,6 +11,59 @@ const importFile = async (page: Page, file: Parameters<FileChooser['setFiles']>[
   await (await chooser).setFiles(file);
 };
 
+test('a merged guest backup restores twice onto each original journal with a shared legacy ID', async ({
+  page,
+  context,
+}, testInfo) => {
+  const a = {
+    id: '1700000000000-0',
+    createdAt: '2026-01-02T03:04:05',
+    question: 'Legacy reading A',
+    cards: [
+      { cardId: 'major-00', orientation: 'upright' },
+      { cardId: 'major-01', orientation: 'reversed' },
+    ],
+    revealed: [false, true],
+  };
+  const b = { ...a, question: 'Legacy reading B' };
+  const restore = async (tab: Page, readings: (typeof a)[]) => {
+    await importFile(tab, {
+      name: 'journal.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(JSON.stringify({ version: 1, readings })),
+    });
+    await tab.getByRole('button', { name: 'Confirm import' }).click();
+    await expect(tab.getByRole('dialog')).toHaveCount(0);
+  };
+  await page.goto('/journal');
+  await restore(page, [a]);
+  await restore(page, [b]);
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export journal' }).click();
+  const backup = testInfo.outputPath('merged.json');
+  await (await downloading).saveAs(backup);
+  const { readings } = JSON.parse(await readFile(backup, 'utf8'));
+  expect(readings).toHaveLength(2);
+  expect(readings.find((r: typeof b) => r.question === b.question).sourceId).toBe(b.id);
+  for (const original of [a, b]) {
+    const tab = await context.newPage();
+    await tab.goto('/journal');
+    await tab.getByRole('button', { name: 'Clear History' }).click();
+    await tab.getByRole('button', { name: 'Clear All Readings' }).click();
+    await expect(tab.getByRole('heading', { name: 'A fresh page awaits.' })).toBeVisible();
+    await restore(tab, [{ ...original, revealed: [true, false] }]);
+    for (let pass = 0; pass < 2; pass++) {
+      await restore(tab, readings);
+      await tab.reload();
+      await expect(tab.getByRole('button', { name: /^Open reading:/ })).toHaveCount(2);
+      const restored = (await savedJournal(tab)).readings;
+      expect(restored.map((row) => row.question).sort()).toEqual([a.question, b.question]);
+      expect(restored.find((row) => row.id === original.id)?.revealed).toEqual([true, true]);
+    }
+    await tab.close();
+  }
+});
+
 for (const single of [true, false]) {
   test(`guest ${single ? 'deletion' : 'clear'} preserves a new draw in another tab and its next reveal`, async ({
     page,
@@ -72,7 +125,7 @@ test('a stale guest confirmation keeps a replacement with the same ID', async ({
   await sibling.getByRole('button', { name: 'Confirm import' }).click();
   await expect(sibling.getByRole('heading', { name: replacement.question })).toBeVisible();
 
-  await page.getByRole('dialog').getByRole('button', { name: 'Delete Reading' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText(/This reading changed in another tab/)).toBeVisible();
   expect((await savedJournal(page)).readings).toEqual([replacement]);
 });
@@ -170,7 +223,12 @@ test('a rejected file leaves the journal intact and a corrected file merges with
     ({ question }) => question === 'Older copy of this question',
   );
   expect(olderCopy?.id).toMatch(/^import-/);
-  expect(withCollision.readings).toEqual(expect.arrayContaining([existing.readings[0], imported]));
+  expect(withCollision.readings).toEqual(
+    expect.arrayContaining([
+      existing.readings[0],
+      { ...imported, createdAt: '2021-03-14T07:30:00.000Z' },
+    ]),
+  );
   await page.getByRole('link', { name: 'Reading', exact: true }).click();
   await expect(page.getByText(existing.readings[0].question, { exact: true })).toBeVisible();
   await page.getByRole('link', { name: /^Journal/ }).click();

@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,6 +32,7 @@ vi.mock('./cloud/journal', () => ({
   revealCards: vi.fn(),
   removeReading: vi.fn(),
   clearReadings: vi.fn(),
+  reviewAccountClear: vi.fn(),
   withClearPreparation: (
     uid: string,
     prepare: Parameters<typeof journal.withClearPreparation>[1],
@@ -133,6 +134,26 @@ beforeEach(() => {
 });
 
 describe('account journal workflows', () => {
+  it('requires a complete account inventory before a clear can be confirmed', async () => {
+    const user = userEvent.setup();
+    signedIn = firstUser;
+    let failReview!: (error: Error) => void;
+    cloud.reviewAccountClear.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          failReview = reject;
+        }),
+    );
+    mount();
+    await user.click(await screen.findByRole('button', { name: 'Clear History' }));
+    const confirm = screen.getByRole('button', { name: 'Clear All Readings' });
+    expect(confirm).toBeDisabled();
+    await act(async () => failReview(new Error('Connect to load the remaining readings.')));
+    expect(screen.getByText('Connect to load the remaining readings.')).toBeVisible();
+    expect(confirm).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Keep Readings' }));
+    expect(cloud.clearReadings).not.toHaveBeenCalled();
+  });
   it('opens signup from the main sign-in link and creates a trusted account after confirming the password', async () => {
     const user = userEvent.setup();
     cloud.signUp.mockImplementation(async () => setAccount({ ...firstUser, emailVerified: false }));
@@ -165,24 +186,42 @@ describe('account journal workflows', () => {
     expect(cloud.observeReadings).not.toHaveBeenCalled();
   });
 
-  it('recovers from a failed login through the password reset page', async () => {
+  it('offers recovery after a rejected signup without confirming who has registered', async () => {
     const user = userEvent.setup();
-    cloud.signIn.mockRejectedValueOnce({ code: 'auth/invalid-credential' });
-    mount('/login');
+    cloud.signUp.mockRejectedValueOnce({ code: 'auth/email-already-in-use' });
+    mount('/signup');
     await user.type(screen.getByLabelText('Email address'), firstUser.email);
-    await user.type(screen.getByLabelText('Password'), 'old-password');
-    await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(cloud.signIn).toHaveBeenCalledWith(firstUser.email, 'old-password', false);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/check your email/i);
-    await user.click(screen.getByRole('link', { name: 'Forgot password?' }));
-    expect(screen.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
-    expect(screen.getByLabelText('Email address')).toHaveValue(firstUser.email);
-    await user.click(screen.getByRole('button', { name: 'Send reset email' }));
-    expect(cloud.resetPassword).toHaveBeenCalledWith(firstUser.email);
-    expect(await screen.findByRole('status')).toHaveTextContent(firstUser.email);
-    await user.click(screen.getByRole('link', { name: 'Back to sign in' }));
-    expect(screen.getByLabelText('Password')).toHaveValue('');
+    await user.type(screen.getByLabelText('Password', { exact: true }), 'test-password');
+    await user.type(screen.getByLabelText('Confirm password'), 'test-password');
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'We couldn’t create an account with those details. Try signing in or resetting your password.',
+    );
+    expect(cloud.observeReadings).not.toHaveBeenCalled();
   });
+
+  it.each(['auth/invalid-credential', 'auth/user-disabled'])(
+    'recovers from rejected credentials (%s) through the password reset page',
+    async (code) => {
+      const user = userEvent.setup();
+      cloud.signIn.mockRejectedValueOnce({ code });
+      mount('/login');
+      await user.type(screen.getByLabelText('Email address'), firstUser.email);
+      await user.type(screen.getByLabelText('Password'), 'old-password');
+      await user.click(screen.getByRole('button', { name: 'Sign in' }));
+      expect(cloud.signIn).toHaveBeenCalledWith(firstUser.email, 'old-password', false);
+      expect(await screen.findByRole('alert')).toHaveTextContent(/check your email/i);
+      await user.click(screen.getByRole('link', { name: 'Forgot password?' }));
+      expect(screen.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
+      expect(screen.getByLabelText('Email address')).toHaveValue(firstUser.email);
+      if (code === 'auth/user-disabled') cloud.resetPassword.mockRejectedValueOnce({ code });
+      await user.click(screen.getByRole('button', { name: 'Send reset email' }));
+      expect(cloud.resetPassword).toHaveBeenCalledWith(firstUser.email);
+      expect(await screen.findByRole('status')).toHaveTextContent(firstUser.email);
+      await user.click(screen.getByRole('link', { name: 'Back to sign in' }));
+      expect(screen.getByLabelText('Password')).toHaveValue('');
+    },
+  );
 
   it.each(['/login', '/signup', '/reset-password'])(
     'opens the journal for an existing session at %s',
@@ -433,7 +472,11 @@ describe('account journal workflows', () => {
           'href',
           'blob:account-export',
         );
-        expect(cloud.exportAccountJournal).toHaveBeenCalledWith(firstUser.uid, false);
+        expect(cloud.exportAccountJournal).toHaveBeenCalledWith(
+          firstUser.uid,
+          false,
+          expect.any(Function),
+        );
         const filename = screen
           .getByRole('link', { name: 'Download backup' })
           .getAttribute('download');
@@ -452,6 +495,78 @@ describe('account journal workflows', () => {
         checkOtherTabs.mockRestore();
         download.mockRestore();
         vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each(['clear', 'lock', 'sign out', 'pagehide'])(
+    'drops the previous account export when a delayed response arrives after %s',
+    async (action) => {
+      const user = userEvent.setup();
+      signedIn = firstUser;
+      let notifyLock!: () => void;
+      cloud.observeJournalLock.mockImplementation((_uid, notify) => {
+        notifyLock = notify;
+        return () => {};
+      });
+      const checkOtherTabs = vi
+        .spyOn(journalActivity, 'checkSiblingRecovery')
+        .mockResolvedValue('clear');
+      let finishExport!: (json: string) => void;
+      cloud.exportAccountJournal.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishExport = resolve;
+        }),
+      );
+      const currentReadings =
+        action === 'clear' ? [] : [action === 'sign out' ? nextReading : firstReading];
+      cloud.exportAccountJournal.mockResolvedValue(
+        JSON.stringify({ version: 1, readings: currentReadings }),
+      );
+      const currentBackup = captureBackup();
+      try {
+        mount();
+        await user.click(screen.getByRole('button', { name: 'Export journal' }));
+        await waitFor(() => expect(cloud.exportAccountJournal).toHaveBeenCalledTimes(1));
+        if (action === 'clear') {
+          cloud.reviewAccountClear.mockResolvedValueOnce({ uid: firstUser.uid, documents: [] });
+          cloud.clearReadings.mockImplementationOnce(async () => publish(firstUser.uid, []));
+          await user.click(screen.getByRole('button', { name: 'Clear History' }));
+          await user.click(await screen.findByRole('button', { name: 'Clear All Readings' }));
+          await waitFor(() => expect(cloud.clearReadings).toHaveBeenCalledTimes(1));
+        } else if (action === 'lock') {
+          act(() => {
+            cloud.isJournalLocked.mockReturnValue(true);
+            notifyLock();
+          });
+          expect(screen.getByRole('heading', { name: 'Journal locked' })).toBeVisible();
+        } else if (action === 'pagehide') {
+          act(() => {
+            window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+            window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+          });
+        } else {
+          await user.click(screen.getByRole('button', { name: 'Sign out' }));
+          act(() => setAccount(nextUser));
+          expect(screen.getByRole('heading', { name: nextUser.email })).toBeVisible();
+        }
+        await act(async () =>
+          finishExport(JSON.stringify({ version: 1, readings: [firstReading] })),
+        );
+        expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+        expect(screen.queryByRole('link', { name: 'Download backup' })).toBeNull();
+        if (action === 'lock')
+          act(() => {
+            cloud.isJournalLocked.mockReturnValue(false);
+            notifyLock();
+          });
+        await user.click(screen.getByRole('button', { name: 'Export journal' }));
+        await screen.findByRole('link', { name: 'Download backup' });
+        expect((await currentBackup()).readings).toEqual(currentReadings);
+      } finally {
+        checkOtherTabs.mockRestore();
+        vi.unstubAllGlobals();
+        vi.mocked(HTMLAnchorElement.prototype.click).mockRestore();
       }
     },
   );

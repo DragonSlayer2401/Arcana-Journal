@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DECK } from '../data/deck';
 import {
+  clearGuestHistory,
   formatReading,
   freshData,
   loadData,
@@ -147,6 +148,35 @@ describe('local reading persistence', () => {
     });
     expect(saveData(original)).toContain('Your cards are still available in this session');
     expect(original).toEqual(snapshot);
+  });
+
+  it('clears an unreadable guest journal without making a new copy of its questions', () => {
+    localStorage.setItem(STORAGE_KEY, '{damaged private entry');
+    localStorage.setItem(RECOVERY_KEY, 'earlier private entry');
+    expect(clearGuestHistory(freshData())).toBe('cleared');
+    expect(loadData()).toEqual({ data: freshData(), warning: '' });
+    expect(localStorage.length).toBe(1);
+  });
+
+  it('keeps the original journal and recoveries if the confirmed clear cannot be saved', () => {
+    const original = savedData();
+    saveData(original);
+    localStorage.setItem(RECOVERY_KEY, 'private recovery');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage denied', 'SecurityError');
+    });
+    expect(clearGuestHistory(freshData())).toBe('journal-write-failed');
+    expect(loadData().data).toEqual(original);
+    expect(localStorage.getItem(RECOVERY_KEY)).toBe('private recovery');
+  });
+
+  it('can erase recovery-only history when the browser has no room for a new journal', () => {
+    localStorage.setItem(RECOVERY_KEY + '.7', 'private recovery');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage full', 'QuotaExceededError');
+    });
+    expect(clearGuestHistory(freshData())).toBe('cleared');
+    expect(localStorage.length).toBe(0);
   });
 
   it('exports the question, draw order and both saved orientations without requiring reveal', () => {

@@ -876,7 +876,10 @@ for (const denied of ['reading the retained copy', 'writing the assigned ID']) {
         const [copy] = loadRecoveryCopies(uid).copies;
         indexedDB.open = open;
         window.Worker = worker;
-        const target = { ...copy.reading, id: copy.importedAs ?? copy.reading.id };
+        const target =
+          copy.importedAs && copy.importedAs !== copy.reading.id
+            ? { ...copy.reading, id: copy.importedAs, sourceId: original.id }
+            : copy.reading;
         const checked = await journal.importAccountReadings(uid, [target]);
         const rows = JSON.parse(await journal.exportAccountJournal(uid)).readings;
         return { preview, error, ordinary, beforeRetry, imported, target, checked, rows };
@@ -944,7 +947,7 @@ test('a one-reading backup updates its explicit ID when a local receipt names an
   );
   assert.deepEqual(
     result.rows.find(({ id }) => id === result.importedAs),
-    { ...original, id: result.importedAs },
+    { ...original, id: result.importedAs, sourceId: original.id },
   );
 });
 
@@ -1333,6 +1336,7 @@ test('two browsers merge reveals, import legacy backups, isolate users, and resu
       };
       return Promise.all([
         denied(firestore.updateDoc(ref, { question: 'Replaced' })),
+        denied(firestore.updateDoc(ref, { sourceId: 'different-original' })),
         denied(firestore.updateDoc(ref, { revealedSlots: [] })),
         denied(firestore.updateDoc(ref, { revealedSlots: [0, 1, 2] })),
         denied(firestore.setDoc(firestore.doc(ref.parent, 'wrong-key'), rows.docs[0].data())),
@@ -1340,7 +1344,7 @@ test('two browsers merge reveals, import legacy backups, isolate users, and resu
     },
     { uid, reading },
   );
-  assert.deepEqual(restrictions, [true, true, true, true]);
+  assert.deepEqual(restrictions, [true, true, true, true, true]);
   await laptop.evaluate(() => window.kit.journal.signOutAccount());
   const newUid = await account(laptop, 'other-' + randomUUID() + '@example.test', true, false);
   const other = await laptop.evaluate(
@@ -1463,7 +1467,98 @@ test('an offline reveal and deletion are refused if another device replaces the 
   );
   const restored = recovered.find((row) => row.id !== original.id);
   assert.match(restored.id, /^import-/);
-  assert.deepEqual(restored, { ...original, id: restored.id, revealed: [false, true] });
+  assert.deepEqual(restored, {
+    ...original,
+    id: restored.id,
+    sourceId: original.id,
+    revealed: [false, true],
+  });
+});
+
+// Simulate the next browser launch after the SDK's token refresh deadline.
+const expireSavedToken = (page) =>
+  page.evaluate(() => {
+    const key = Object.keys(localStorage).find((key) => key.startsWith('firebase:authUser:'));
+    const record = JSON.parse(localStorage.getItem(key));
+    record.stsTokenManager.expirationTime = Date.now() - 1;
+    localStorage.setItem(key, JSON.stringify(record));
+  });
+
+const withdrawEmailVerification = async (uid) => {
+  const change = await fetch(
+    'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-arcana-journal/accounts:update',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ localId: uid, emailVerified: false }),
+    },
+  );
+  assert.ok(change.ok, 'The emulator must update the test account');
+};
+
+test('a verification downgrade closes an open trusted journal and keeps it closed on an offline restart', async (t) => {
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  const owner = await open(context);
+  const email = 'verification-change-' + randomUUID() + '@example.test';
+  const uid = await account(owner, email, true, true);
+  const reading = { ...entry(randomUUID()), question: 'Private before verification changed' };
+  await owner.evaluate(({ uid, reading }) => window.kit.journal.createReading(uid, reading), {
+    uid,
+    reading,
+  });
+  const ui = await context.newPage();
+  await ui.goto(base + '/journal');
+  const question = { name: reading.question, exact: true };
+  await ui.getByRole('heading', question).waitFor();
+  await withdrawEmailVerification(uid);
+  // Obtain the new token through Firebase while the existing tab still has the old profile.
+  assert.deepEqual(
+    await owner.evaluate(async () => {
+      const user = window.kit.getAuth().currentUser;
+      const token = await user.getIdTokenResult(true);
+      return [user.emailVerified, token.claims.email_verified];
+    }),
+    [true, false],
+  );
+  await ui.getByRole('button', { name: 'Check verification' }).waitFor();
+  assert.equal(await ui.getByRole('heading', question).count(), 0);
+  await ui.close();
+  await expireSavedToken(owner);
+  await owner.close();
+  await context.route(/^http:\/\/127\.0\.0\.1:(8080|9099)\//, (route) =>
+    route.abort('internetdisconnected'),
+  );
+  const offline = await context.newPage();
+  await offline.goto(base + '/journal');
+  await offline.getByRole('button', { name: 'Check verification' }).waitFor();
+  assert.equal(await offline.getByRole('heading', question).count(), 0);
+});
+
+test('an owner whose email needs verification can return to verification without unlocking other trusted tabs', async (t) => {
+  const context = await browser.newContext();
+  t.after(() => context.close());
+  const owner = await open(context);
+  const uid = await account(
+    owner,
+    'verify-at-unlock-' + randomUUID() + '@example.test',
+    true,
+    true,
+  );
+  const ui = await context.newPage();
+  await ui.goto(base + '/journal');
+  await ui.getByRole('button', { name: 'Lock journal' }).click();
+  const sibling = await context.newPage();
+  await sibling.goto(base + '/journal');
+  const locked = sibling.getByRole('heading', { name: 'Journal locked' });
+  await locked.waitFor();
+  await withdrawEmailVerification(uid);
+  await ui.getByLabel('Password').fill(password);
+  await ui.getByRole('button', { name: 'Unlock journal' }).click();
+  await ui.getByRole('button', { name: 'Check verification' }).waitFor();
+  assert.ok(await locked.isVisible());
+  await sibling.reload();
+  await locked.waitFor();
 });
 
 test('trusted account reopens its cached readings with both Firebase services offline', async () => {
@@ -1479,6 +1574,7 @@ test('trusted account reopens its cached readings with both Firebase services of
     },
     { uid, reading },
   );
+  await expireSavedToken(initial);
   await initial.close();
   await context.route(/^http:\/\/127\.0\.0\.1:(8080|9099)\//, (route) =>
     route.abort('internetdisconnected'),

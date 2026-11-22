@@ -12,6 +12,7 @@ import {
   query,
   runTransaction,
   setDoc,
+  snapshotEqual,
   startAfter,
   updateDoc,
   where,
@@ -20,14 +21,17 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import {
+  assignReadingId,
   createJournalBackup,
   findImportTarget,
   mergeReveals,
+  originalForLegacyAlternate,
   UncheckedDeletionsExportError,
   resolveImportReading,
   sameReadingContent,
 } from '../domain/journalBackup';
 import { isReading } from '../domain/storage';
+import { readingEpoch } from '../domain/readingDate';
 import {
   authoritativeRecoveryCopies,
   loadRecoveryCopies,
@@ -63,6 +67,7 @@ export {
   observeAccount,
   observeJournalLock,
   refreshAccount,
+  retryOfflineRemoval,
   resetLockedJournalPassword,
   resetPassword,
   sendVerification,
@@ -95,14 +100,15 @@ const revealedSlots = (reading: Reading) =>
 const readingIdentityFields = (reading: Reading) => ({
   id: reading.id,
   question: reading.question,
-  createdAtMs: Date.parse(reading.createdAt),
+  createdAtMs: readingEpoch(reading.createdAt),
   cardIds: reading.cards.map(({ cardId }) => cardId),
   orientations: reading.cards.map(({ orientation }) => orientation),
 });
 
 const encodeReading = (reading: Reading) => ({
   ...readingIdentityFields(reading),
-  createdAt: reading.createdAt,
+  createdAt: new Date(readingEpoch(reading.createdAt)).toISOString(),
+  ...(reading.sourceId && { sourceId: reading.sourceId }),
   revealedSlots: revealedSlots(reading),
 });
 
@@ -117,6 +123,7 @@ const decodeReading = (snapshot: DocumentSnapshot): Reading => {
   ) {
     const reading = {
       id: data.id,
+      ...(data.sourceId !== undefined && { sourceId: data.sourceId }),
       createdAt: data.createdAt,
       question: data.question,
       cards: data.cardIds.map((cardId, index) => ({
@@ -127,7 +134,8 @@ const decodeReading = (snapshot: DocumentSnapshot): Reading => {
     };
     if (
       isReading(reading) &&
-      data.createdAtMs === Date.parse(reading.createdAt) &&
+      Number.isSafeInteger(data.createdAtMs) &&
+      Number.isFinite(readingEpoch(reading.createdAt, data.createdAtMs)) &&
       data.revealedSlots.every(
         (slot: unknown) =>
           typeof slot === 'number' &&
@@ -136,7 +144,7 @@ const decodeReading = (snapshot: DocumentSnapshot): Reading => {
           slot < reading.cards.length,
       )
     ) {
-      return reading;
+      return { ...reading, createdAt: new Date(data.createdAtMs).toISOString() };
     }
   }
   throw new Error(
@@ -433,9 +441,14 @@ const readPage = async (database: Firestore, uid: string, cursor: string | null)
     throw new Error('Wait for your journal to finish syncing, then try again.');
   return page;
 };
+export type WatchExportHistory = (invalidated: () => void) => () => void;
+const clearRevision = (snapshot: DocumentSnapshot) =>
+  JSON.stringify([snapshot.get('token') ?? null, snapshot.get('active') === true]);
+
 export const exportAccountJournal = async (
   uid: string,
   allowUncheckedDeletions = false,
+  receiveWatcher?: (watch: WatchExportHistory) => void,
 ): Promise<string> => {
   requireVerifiedAccount(uid);
   const trusted = isOfflineJournalEnabled(uid);
@@ -449,7 +462,7 @@ export const exportAccountJournal = async (
       throw new UncheckedDeletionsExportError(
         'Clear History may still delete readings from this account. Retry Export journal after the clear finishes, or choose Export available readings for a backup that may include those readings.',
       );
-    return clear.get('token') as string | undefined;
+    return clearRevision(clear);
   };
   const startingRevision = await checkedRevision();
   const reservations: string[] = [];
@@ -470,15 +483,72 @@ export const exportAccountJournal = async (
   requireVerifiedAccount(uid);
   await checkDeletionsForExport(uid, trusted, allowUncheckedDeletions);
   await checkExportReservations(reservations, allowUncheckedDeletions);
-  if ((await checkedRevision()) !== startingRevision)
+  let revision = await checkedRevision();
+  if (revision !== startingRevision)
     throw new Error(
       'The journal changed while the backup was being prepared. Choose Export journal again.',
     );
+  if (receiveWatcher) {
+    const control = clearFor(database, uid);
+    if (allowUncheckedDeletions) {
+      // An explicitly partial export can still be downloaded if the control
+      // cannot be read. Its reusable link expires on the first server check.
+      revision = await getDocFromServer(control).then(clearRevision, () => undefined);
+    }
+    receiveWatcher((invalidate) =>
+      onSnapshot(
+        control,
+        { includeMetadataChanges: true },
+        (next) => {
+          if (
+            !next.metadata.fromCache &&
+            !next.metadata.hasPendingWrites &&
+            clearRevision(next) !== revision
+          )
+            invalidate();
+        },
+        invalidate,
+      ),
+    );
+  }
   requireVerifiedAccount(uid);
   return backup;
 };
 
 type SubmitClear = (onPageSubmitted?: () => void) => Promise<void>;
+
+export interface AccountClearReview {
+  uid: string;
+  documents: DocumentSnapshot[];
+}
+
+// Complete the inventory before enabling the confirmation. Deletion only ever
+// visits these snapshots, even when another device adds a reading between pages.
+export const reviewAccountClear = async (uid: string): Promise<AccountClearReview> => {
+  await dispatches.get(uid);
+  const database = await onlineDatabase(uid);
+  const documents: DocumentSnapshot[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await readPage(database, uid, cursor);
+    if (page.size) {
+      // A query can include SDK bookkeeping from a recently acknowledged write.
+      // Capture the server versions through the same transaction API used by
+      // deletion, so that bookkeeping cannot hide an otherwise unchanged draw.
+      const reviewed = await runTransaction(database, (transaction) =>
+        Promise.all(page.docs.map((entry) => transaction.get(entry.ref))),
+      );
+      requireVerifiedAccount(uid);
+      for (const entry of reviewed) {
+        if (!entry.exists()) continue;
+        decodeReading(entry);
+        documents.push(entry);
+      }
+    }
+    cursor = page.size === pageSize ? page.docs[page.size - 1].id : null;
+  } while (cursor !== null);
+  return { uid, documents };
+};
 
 const clearChanged =
   'The journal changed while it was clearing. Review the remaining readings and confirm again.';
@@ -501,13 +571,13 @@ const submitClear = async (
   database: Firestore,
   uid: string,
   token: string,
+  review: AccountClearReview,
   onPageSubmitted?: () => void,
 ) => {
   const control = clearFor(database, uid);
-  let cursor: string | null = null;
-  do {
-    const page = await readPage(database, uid, cursor);
-    const lastPage = page.size < pageSize;
+  for (let offset = 0; ; offset += pageSize) {
+    const page = review.documents.slice(offset, offset + pageSize);
+    const lastPage = offset + page.length >= review.documents.length;
     await runTransaction(
       database,
       async (transaction) => {
@@ -515,24 +585,20 @@ const submitClear = async (
         const active = await transaction.get(control);
         if (active.get('token') !== token || active.get('active') !== true)
           throw new Error(clearChanged);
-        const current = await Promise.all(page.docs.map((entry) => transaction.get(entry.ref)));
+        const current = await Promise.all(page.map((entry) => transaction.get(entry.ref)));
         requireVerifiedAccount(uid);
-        for (const [index, entry] of current.entries()) {
-          if (!entry.exists()) continue;
-          if (!sameReadingContent(decodeReading(entry), decodeReading(page.docs[index])))
-            throw new Error(
-              'A reading changed while the journal was clearing. Review it and confirm again.',
-            );
-          transaction.delete(entry.ref);
-        }
+        // Snapshot equality checks the document version as well as its content.
+        // This also protects a deleted and identically recreated reading.
+        const unchanged = current.filter((entry, index) => snapshotEqual(entry, page[index]));
+        for (const entry of unchanged) transaction.delete(entry.ref);
         if (lastPage) transaction.set(control, { token, active: false });
         // From here the server may commit this page even if its response is lost.
-        if (!page.empty) onPageSubmitted?.();
+        if (unchanged.length) onPageSubmitted?.();
       },
       { maxAttempts: 1 },
     ).catch(reportClearConflict);
-    cursor = lastPage ? null : page.docs[page.size - 1].id;
-  } while (cursor !== null);
+    if (lastPage) return;
+  }
 };
 
 // Publish the confirmation before resolving local recovery targets. The browser
@@ -540,6 +606,7 @@ const submitClear = async (
 export const withClearPreparation = (
   uid: string,
   prepare: (submit: SubmitClear) => Promise<void>,
+  confirmedReview?: AccountClearReview,
 ) =>
   trackWrite(
     uid,
@@ -547,6 +614,8 @@ export const withClearPreparation = (
       requireVerifiedAccount(uid);
       if (!navigator.onLine)
         throw new Error('Connect to the internet to clear your account journal.');
+      const review = confirmedReview ?? (await reviewAccountClear(uid));
+      if (review.uid !== uid) throw new Error('The journal account changed. Review it again.');
       const token = crypto.randomUUID();
       const release = await reserveVolatileDeletion(clearRegistrationName(uid)).catch(() => {
         throw new Error(
@@ -570,7 +639,9 @@ export const withClearPreparation = (
         release();
       }
       try {
-        await prepare((onPageSubmitted) => submitClear(database, uid, token, onPageSubmitted));
+        await prepare((onPageSubmitted) =>
+          submitClear(database, uid, token, review, onPageSubmitted),
+        );
       } catch (error) {
         // Staging can fail before a delete is sent. Retire only this clear, even
         // if a sibling has since recovered a reading or started a different clear.
@@ -615,7 +686,7 @@ type ImportProgress = (completed: number, total: number) => void;
 export const lookupRecoveryImportTarget = async (uid: string, source: Reading) => {
   const database = await onlineDatabase(uid);
   const snapshot = await getDocsFromServer(
-    query(readingsFor(database, uid), where('createdAtMs', '==', Date.parse(source.createdAt))),
+    query(readingsFor(database, uid), where('createdAtMs', '==', readingEpoch(source.createdAt))),
   );
   requireVerifiedAccount(uid);
   return findImportTarget(
@@ -641,9 +712,9 @@ const accountImportResolver = (
   copies: RecoveryCopy[],
   onUnchecked: () => void,
 ) => {
-  const dates = Array.from(new Set(incoming.map((r) => Date.parse(r.createdAt))));
+  const dates = Array.from(new Set(incoming.map((r) => readingEpoch(r.createdAt))));
   const groupByDate = new Map(dates.map((date, i) => [date, Math.floor(i / 30)]));
-  const explicitIds = new Set(incoming.map((reading) => reading.id));
+  const incomingById = new Map(incoming.map((reading) => [reading.id, reading]));
   const candidates = new Map<number, Promise<Reading[]>>();
   const trusted = isOfflineJournalEnabled(uid);
   const client = deletionClient(uid, trusted);
@@ -656,45 +727,38 @@ const accountImportResolver = (
         throw new Error('The journal session changed. Review the import and try again.');
       return lookup(id);
     };
+    const assigned = copies.some(
+      (copy) => copy.importedAs === source.id && sameReadingContent(copy.reading, source),
+    );
     const result = await resolveImportReading(
       source,
       lookupAfterDeletion,
-      knownImportTarget(copies, source),
-      explicitIds,
+      assigned ? source.id : knownImportTarget(copies, source),
+      incomingById,
     );
     // Recovery already names its assigned document. A same-date legacy copy
     // with unrelated provenance must not prevent restoring a missing target.
-    if (
-      result.existing ||
-      copies.some(
-        (copy) => copy.importedAs === source.id && sameReadingContent(copy.reading, source),
-      )
-    )
-      return result;
-    const group = groupByDate.get(Date.parse(source.createdAt))!;
+    if (result.existing || assigned) return result;
+    const group = groupByDate.get(readingEpoch(source.createdAt))!;
     if (!candidates.has(group)) {
       const matchingDates = dates.slice(group * 30, (group + 1) * 30);
       candidates.set(
         group,
         getDocsFromServer(
           query(readingsFor(database, uid), where('createdAtMs', 'in', matchingDates)),
-        ).then((snapshot) =>
-          snapshot.docs
-            .filter(
-              (doc) => typeof doc.get('id') === 'string' && doc.get('id').startsWith('import-'),
-            )
-            .map(decodeReading),
-        ),
+        ).then((snapshot) => snapshot.docs.map(decodeReading)),
       );
     }
-    const previousId = await findImportTarget(
-      source,
-      await candidates.get(group)!,
-      true,
-      explicitIds,
-    );
+    const matches = await candidates.get(group)!;
+    const original = await originalForLegacyAlternate(source, matches, incomingById);
+    if (original) {
+      const current = await lookupAfterDeletion(original.id);
+      if (current && sameReadingContent(current, source))
+        return { id: current.id, existing: current };
+    }
+    const previousId = await findImportTarget(source, matches, true, incomingById);
     return previousId
-      ? resolveImportReading(source, lookupAfterDeletion, previousId, explicitIds)
+      ? resolveImportReading(source, lookupAfterDeletion, previousId, incomingById)
       : result;
   };
 };
@@ -720,7 +784,7 @@ export const previewAccountImport = async (
       return known.get(id);
     });
     result[importChange(existing, incoming)]++;
-    known.set(id, existing ? mergeReveals(existing, incoming) : { ...incoming, id });
+    known.set(id, existing ? mergeReveals(existing, incoming) : assignReadingId(incoming, id));
     onProgress?.(result.added + result.skipped + result.updated, readings.length);
   }
   requireVerifiedAccount(uid);
@@ -776,7 +840,8 @@ export const importAccountReadings = (
           // observed a missing or older document cannot start after this commit.
           if (recovering || retainedCopies || clear.get('active') === true)
             transaction.set(control, { token: crypto.randomUUID(), active: false });
-          if (action === 'added') transaction.set(reference, encodeReading({ ...incoming, id }));
+          if (action === 'added')
+            transaction.set(reference, encodeReading(assignReadingId(incoming, id)));
           if (action === 'updated')
             transaction.update(reference, {
               revealedSlots: arrayUnion(...revealedSlots(incoming)),

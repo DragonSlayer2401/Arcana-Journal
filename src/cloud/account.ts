@@ -35,6 +35,15 @@ import {
 
 import { signOutWithoutPendingEdits } from './journalActivity';
 import { hasPendingDeletion } from './deletionQueue';
+import { requestStore } from './deletionStore';
+import {
+  eraseOfflineCache,
+  hasOfflineCache,
+  OfflineRemovalBlocked,
+  offlineStorageUnavailable,
+  pendingOfflineChanges,
+} from './offlineCache';
+import { loadRecoveryCopies } from '../domain/readingRecovery';
 import { StorageLockUnavailableError, withStorageLock } from '../domain/storageLock';
 
 const useEmulators = import.meta.env.MODE === 'emulator';
@@ -326,10 +335,45 @@ export interface JournalUser {
   email: string | null;
   emailVerified: boolean;
   signOutIncomplete?: boolean;
+  offlineRemoval?: string;
 }
 
-const asAccount = (user: User | null): JournalUser | null =>
-  user && { uid: user.uid, email: user.email, emailVerified: user.emailVerified };
+const removalKey = (uid: string) => 'arcana.journal.offline-removal:' + uid;
+interface OfflineRemovalReceipt {
+  login: string;
+  notice?: string;
+}
+const removalReceipts = new Map<string, OfflineRemovalReceipt>();
+const loginGeneration = (user: User) =>
+  currentLogin(user).login ?? user.metadata.lastSignInTime ?? 'legacy';
+const removalReceipt = (user: User): OfflineRemovalReceipt | undefined => {
+  let receipt = removalReceipts.get(user.uid);
+  try {
+    receipt ??= JSON.parse(sessionStorage.getItem(removalKey(user.uid)) ?? 'null');
+  } catch {
+    // An unreadable or old receipt requires checking this owner's cache again.
+  }
+  return receipt?.login === loginGeneration(user) ? receipt : undefined;
+};
+const recordRemoval = (user: User, notice?: string) => {
+  const receipt = { login: loginGeneration(user), notice };
+  removalReceipts.set(user.uid, receipt);
+  try {
+    sessionStorage.setItem(removalKey(user.uid), JSON.stringify(receipt));
+  } catch {
+    // A later reload can check the disk again. Restoration never erases a cache.
+  }
+};
+const asAccount = (user: User | null): JournalUser | null => {
+  if (!user) return null;
+  const notice = !journalTrust(user.uid) && removalReceipt(user)?.notice;
+  return {
+    uid: user.uid,
+    email: user.email,
+    emailVerified: user.emailVerified,
+    ...(notice ? { offlineRemoval: notice } : {}),
+  };
+};
 
 const explicitTrust = new WeakMap<User, boolean>();
 const journalTrust = (uid: string): boolean | undefined => {
@@ -494,9 +538,17 @@ export const lockJournal = async (uid: string): Promise<void> => {
 // the origin becomes read-only, independently verify the password with in-memory
 // Auth and give this owner's journal the fresh credentials for this session.
 let passwordVerifier: ReturnType<typeof memoryAuthFor> | undefined;
+const cachedToken = (user: User): string | undefined =>
+  (user.toJSON() as { stsTokenManager?: { accessToken?: string } }).stsTokenManager?.accessToken;
 const tabCredentials = new WeakMap<
   User,
-  { previousToken: string; primaryToken: string; verified: User }
+  {
+    previousToken: string;
+    primaryToken: string;
+    previousAccess?: string;
+    primaryAccess?: string;
+    verified: User;
+  }
 >();
 const journalCredentials = (owner: User): User => {
   const local = tabCredentials.get(owner);
@@ -504,7 +556,11 @@ const journalCredentials = (owner: User): User => {
   // A sibling can re-publish the last persisted credentials after our primary
   // SDK refreshed its in-memory user but failed to save it. Keep both snapshots
   // associated with the local proof until a new primary credential arrives.
-  if (owner.refreshToken === local.previousToken || owner.refreshToken === local.primaryToken)
+  const access = cachedToken(owner);
+  if (
+    (owner.refreshToken === local.previousToken && access === local.previousAccess) ||
+    (owner.refreshToken === local.primaryToken && access === local.primaryAccess)
+  )
     return local.verified;
   tabCredentials.delete(owner);
   return owner;
@@ -512,6 +568,7 @@ const journalCredentials = (owner: User): User => {
 
 const verifyOwnerPassword = async (owner: User, email: string, password: string) => {
   const previousToken = owner.refreshToken;
+  const previousAccess = cachedToken(owner);
   const credential = EmailAuthProvider.credential(email, password);
   try {
     await reauthenticateWithCredential(owner, credential);
@@ -531,7 +588,13 @@ const verifyOwnerPassword = async (owner: User, email: string, password: string)
       if (verified.uid !== owner.uid || requireAccount(owner.uid) !== owner)
         throw new Error('The journal account has changed. Please retry.');
       if (owner.emailVerified && !verified.emailVerified) throw new Error(verificationRequired);
-      tabCredentials.set(owner, { previousToken, primaryToken: owner.refreshToken, verified });
+      tabCredentials.set(owner, {
+        previousToken,
+        primaryToken: owner.refreshToken,
+        previousAccess,
+        primaryAccess: cachedToken(owner),
+        verified,
+      });
       return 'tab';
     } finally {
       await signOut(passwordVerifier);
@@ -551,7 +614,9 @@ export const unlockJournal = async (uid: string, password: string): Promise<void
     );
   if (generation === null && !relock) return;
   const credentialScope = await verifyOwnerPassword(user, user.email, password);
-  if (user.emailVerified && connection?.uid === uid) await connection.refreshUser(user);
+  const verified = user.emailVerified && hasVerifiedCachedToken(journalCredentials(user));
+  if (!verified) await notifyCheckedAccount(user);
+  else if (connection?.uid === uid) await connection.refreshUser(user);
   if (requireAccount(uid) !== user)
     throw new Error('The journal account has changed. Please retry.');
   if (tabRelocks.get(user) !== relock)
@@ -572,7 +637,13 @@ export const unlockJournal = async (uid: string, password: string): Promise<void
     tabUnlocks.set(user, { generation: observed, unreadableOnly: true });
   } else {
     let shared = false;
-    if (credentialScope === 'shared') {
+    // A password still lets this owner return to verification in this tab.
+    // Only verified credentials may release the lock for offline siblings.
+    if (
+      credentialScope === 'shared' &&
+      user.emailVerified &&
+      hasVerifiedCachedToken(journalCredentials(user))
+    ) {
       try {
         localStorage.setItem(unlockKey(uid), generation);
         shared = true;
@@ -590,8 +661,30 @@ export const unlockJournal = async (uid: string, password: string): Promise<void
   notifyJournalLock(uid);
 };
 
+// The SDK refreshes expired tokens before returning their claims, even offline.
+// Use only the SDK user's last token for reopening a trusted cache offline.
+// All remote access still goes through Firestore's verification of a fresh token.
+const hasVerifiedCachedToken = (user: User): boolean => {
+  try {
+    const payload = cachedToken(user)?.split('.')[1];
+    if (!payload) return false;
+    const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+      c.charCodeAt(0),
+    );
+    const claims = JSON.parse(new TextDecoder().decode(bytes));
+    return (
+      claims.sub === user.uid &&
+      claims.aud === config.projectId &&
+      claims.iss === 'https://securetoken.google.com/' + config.projectId &&
+      claims.email_verified === true
+    );
+  } catch {
+    return false;
+  }
+};
+
 // A profile restored after following an email link can be newer than its cached ID token.
-const verifyJournalToken = async (owner: User, forceRefresh = false) => {
+const verifyJournalToken = async (owner: User, forceRefresh = false, refreshUnverified = true) => {
   const user = journalCredentials(owner);
   let token;
   try {
@@ -605,12 +698,13 @@ const verifyJournalToken = async (owner: User, forceRefresh = false) => {
       error &&
       typeof error === 'object' &&
       'code' in error &&
-      error.code === 'auth/network-request-failed'
+      error.code === 'auth/network-request-failed' &&
+      hasVerifiedCachedToken(user)
     )
       return;
     throw error;
   }
-  if (!forceRefresh && token.claims.email_verified !== true) {
+  if (!forceRefresh && refreshUnverified && token.claims.email_verified !== true) {
     token = await user.getIdTokenResult(true);
   }
   if (token.claims.email_verified !== true) throw new Error(verificationRequired);
@@ -632,19 +726,25 @@ const releaseAccount = () => {
   closing = previous.close().catch(() => {});
 };
 
+const trustedAppName = (uid: string) => 'journal-' + uid + '-device';
+
 export const databaseFor = (uid: string): Promise<Firestore> => {
   const user = requireVerifiedAccount(uid);
   const trusted = journalTrust(uid);
   if (trusted === undefined)
     throw new Error('Allow browser storage so this device can reopen your original journal.');
-  if (connection?.uid === uid && connection.trusted === trusted) {
+  if (
+    connection?.uid === uid &&
+    connection.trusted === trusted &&
+    hasVerifiedCachedToken(journalCredentials(user))
+  ) {
     const current = connection;
     return current.refreshUser(user, false).then(() => current.database);
   }
   releaseAccount();
   // A Firebase app name is part of the Firestore IndexedDB namespace. A trusted
   // journal can therefore resume offline writes without sharing cache with a different login.
-  const name = 'journal-' + uid + (trusted ? '-device' : '-session');
+  const name = trusted ? trustedAppName(uid) : 'journal-' + uid + '-session';
   const opened = closing.then(async () => {
     await verifyJournalToken(user);
     requireVerifiedAccount(uid);
@@ -781,13 +881,57 @@ const visibleAccount = (account: JournalUser | null): JournalUser | null => {
   }
   return account;
 };
+const checkedAccount = async (
+  user: User | null,
+  refreshUnverified = true,
+): Promise<JournalUser | null> => {
+  const account = asAccount(user);
+  if (user?.emailVerified && account) {
+    try {
+      await verifyJournalToken(user, false, refreshUnverified);
+      if (!user.emailVerified || !hasVerifiedCachedToken(journalCredentials(user)))
+        return { ...account, emailVerified: false };
+    } catch {
+      return { ...account, emailVerified: false };
+    }
+  }
+  return account;
+};
+const notifyCheckedAccount = async (user: User | null) => {
+  const account = await checkedAccount(user);
+  if (auth.currentUser !== user) throw new Error('The journal account has changed. Please retry.');
+  const visible = visibleAccount(account);
+  for (const listener of refreshListeners) listener(visible);
+  return visible;
+};
 export const observeAccount = (onUser: (user: JournalUser | null) => void): (() => void) => {
   let active = true;
-  refreshListeners.add(onUser);
-  const unsubscribe = onAuthStateChanged(auth, async () => {
+  let revision = 0;
+  let previous: User | null | undefined;
+  let shown: JournalUser | null | undefined;
+  const publish = (account: JournalUser | null) => {
+    shown = account;
+    onUser(account);
+  };
+  refreshListeners.add(publish);
+  const unsubscribe = onIdTokenChanged(auth, async () => {
+    const version = ++revision;
     await settling;
-    if (!active) return;
+    if (!active || version !== revision) return;
     const user = auth.currentUser;
+    const changedUser = previous !== user;
+    previous = user;
+    // A refreshed token can withdraw verification without changing the UID or
+    // cached profile. Hide an open journal before waiting for any storage I/O.
+    if (
+      shown?.emailVerified &&
+      user &&
+      shown.uid === user.uid &&
+      (!user.emailVerified || !hasVerifiedCachedToken(journalCredentials(user)))
+    ) {
+      releaseAccount();
+      publish(visibleAccount({ ...shown, emailVerified: false }));
+    }
     if (user && interruptedSignOut && user.uid !== interruptedSignOut.uid) {
       try {
         const storage = interruptedSignOut.trusted ? localStorage : sessionStorage;
@@ -799,7 +943,7 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
       }
     }
     if (interruptedSignOut) {
-      onUser(visibleAccount(null));
+      publish(visibleAccount(null));
       return;
     }
     if (user) {
@@ -807,16 +951,10 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
       isJournalLocked(user.uid);
     }
     if (connection && (connection.uid !== user?.uid || !user?.emailVerified)) releaseAccount();
-    let account = asAccount(user);
-    if (user?.emailVerified && account) {
-      try {
-        await verifyJournalToken(user);
-      } catch {
-        // Keep the local journal available; Check verification can retry when connected.
-        account = { ...account, emailVerified: false };
-      }
-    }
-    if (active && auth.currentUser === user) {
+    if (user && journalTrust(user.uid) === false) await checkRestoredSession(user);
+    const account = await checkedAccount(user, changedUser);
+    if (active && version === revision && auth.currentUser === user) {
+      if (!account?.emailVerified && connection?.uid === user?.uid) releaseAccount();
       if (
         account?.emailVerified &&
         isOfflineJournalEnabled(account.uid) &&
@@ -830,15 +968,89 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
             // An account switch may stop the client. Unsynced copies stay with the owner.
           });
       }
-      onUser(visibleAccount(account));
+      publish(visibleAccount(account));
     }
   });
   return () => {
     active = false;
-    refreshListeners.delete(onUser);
+    refreshListeners.delete(publish);
     unsubscribe();
   };
 };
+
+// A memory-only journal can still open while a trusted tab finishes syncing.
+// Keep a retry notice with this session until every private copy is accounted for.
+const ensureRecoverySettled = async (uid: string) => {
+  const inventory = loadRecoveryCopies(uid);
+  if (!inventory.complete) throw new Error(offlineStorageUnavailable);
+  if (inventory.copies.length || inventory.pendingCleanup.length || inventory.prepared.length)
+    throw new OfflineRemovalBlocked(pendingOfflineChanges);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const pendingDeletes = await Promise.race([
+    requestStore(uid, 'readonly', (store) => store.count(), 0),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(offlineStorageUnavailable)), 2000);
+    }),
+  ]).finally(() => clearTimeout(timeout));
+  if (pendingDeletes) throw new OfflineRemovalBlocked(pendingOfflineChanges);
+};
+const removalError = (error: unknown) =>
+  error instanceof OfflineRemovalBlocked ? error.message : offlineStorageUnavailable;
+const restoredChecks = new WeakMap<User, Promise<void>>();
+const checkRestoredSession = (user: User) => {
+  if (removalReceipt(user)) return;
+  const existing = restoredChecks.get(user);
+  if (existing) return existing;
+  const generation = loginGeneration(user);
+  const check = async () => {
+    let notice: string | undefined;
+    try {
+      await ensureRecoverySettled(user.uid);
+      if (await hasOfflineCache(trustedAppName(user.uid), config.projectId)) {
+        // An old session has no record of when trust was last granted. A newer
+        // trusted login may already have signed out. Ask before erasing its cache.
+        notice =
+          'An offline journal from a trusted sign-in is still on this device. Choose Retry offline journal removal to check pending changes and remove this account’s copy.';
+      }
+    } catch (error) {
+      notice = removalError(error);
+    }
+    if (auth.currentUser === user && loginGeneration(user) === generation && !removalReceipt(user))
+      recordRemoval(user, notice);
+  };
+  const pending = check().finally(() => restoredChecks.delete(user));
+  restoredChecks.set(user, pending);
+  return pending;
+};
+const removeOfflineJournal = async (uid: string) => {
+  const user = requireAccount(uid);
+  if (journalTrust(uid) !== false)
+    throw new Error('Sign in with device trust off to remove the offline journal.');
+  recordRemoval(user, offlineStorageUnavailable);
+  try {
+    if (storedOwner(localStorage, loginPersistenceManager().fullUserKey)?.uid === uid) {
+      throw new OfflineRemovalBlocked(
+        'This account still has a trusted sign-in on this device. Let its journal sync, sign out of the trusted tab, then retry removal here.',
+      );
+    }
+    if (connection?.uid === uid && connection.trusted) {
+      if (hasOutstandingWrites(uid)) throw new OfflineRemovalBlocked(pendingOfflineChanges);
+      releaseAccount();
+    }
+    await closing;
+    await ensureRecoverySettled(uid);
+    await eraseOfflineCache(trustedAppName(uid), config.projectId);
+    recordRemoval(user);
+  } catch (error) {
+    recordRemoval(user, removalError(error));
+  }
+};
+
+export const retryOfflineRemoval = (uid: string) =>
+  withAuthChange(async () => {
+    await removeOfflineJournal(uid);
+    await notifyCheckedAccount(requireAccount(uid));
+  });
 
 const authenticate = (email: string, password: string, trusted: boolean, register: boolean) =>
   withAuthChange(async () => {
@@ -862,6 +1074,8 @@ const authenticate = (email: string, password: string, trusted: boolean, registe
         : await signInWithEmailAndPassword(auth, email.trim(), password);
       explicitTrust.set(credential.user, trusted);
       if (trusted) reserveFirstLock(credential.user.uid);
+      else if (!register) await removeOfflineJournal(credential.user.uid);
+      else recordRemoval(credential.user);
       if (savedJournalLock(credential.user.uid) === undefined) {
         tabUnlocks.set(credential.user, {
           generation: observedLocks.get(credential.user),
@@ -893,7 +1107,8 @@ export const refreshAccount = async () => {
   const user = auth.currentUser;
   if (user) {
     await reload(user);
-    requireAccount(user.uid);
+    if (auth.currentUser !== user)
+      throw new Error('The journal account has changed. Please retry.');
     if (user.emailVerified) {
       await verifyJournalToken(user, true);
       requireVerifiedAccount(user.uid);
@@ -903,9 +1118,7 @@ export const refreshAccount = async () => {
     }
     requireAccount(user.uid);
   }
-  const active = visibleAccount(asAccount(auth.currentUser));
-  for (const listener of refreshListeners) listener(active);
-  return active;
+  return notifyCheckedAccount(user);
 };
 export const resetPassword = (email: string) =>
   sendPasswordResetEmail(auth, email.trim(), returnToJournal());
@@ -998,7 +1211,7 @@ export const signOutAccount = async (displayedUid?: string) => {
     }
     if (interruptedSignOut) {
       setInterruptedSignOut(null);
-      for (const listener of refreshListeners) listener(asAccount(auth.currentUser));
+      await notifyCheckedAccount(auth.currentUser);
     }
     if (connection?.uid === uid) releaseAccount();
   };

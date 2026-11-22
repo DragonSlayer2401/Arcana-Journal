@@ -1,4 +1,10 @@
-import { mergeReveals, resolveImportReading, sameReadingContent } from './journalBackup';
+import {
+  assignReadingId,
+  mergeReveals,
+  resolveImportReading,
+  sameReadingContent,
+} from './journalBackup';
+import { readingEpoch } from './readingDate';
 import type { Reading } from './types';
 
 const unchanged = (base: Reading | undefined, reading: Reading) =>
@@ -11,7 +17,7 @@ const unchanged = (base: Reading | undefined, reading: Reading) =>
 export const recoverGuestReadings = async (base: Reading[], draft: Reading[], saved: Reading[]) => {
   const original = new Map(base.map((reading) => [reading.id, reading]));
   const draftIds = new Set(draft.map((reading) => reading.id));
-  const reserved = new Set([...draftIds, ...saved.map((reading) => reading.id)]);
+  const reserved = new Map([...draft, ...saved].map((reading) => [reading.id, reading]));
   const recovered = new Map(
     saved
       .filter(
@@ -33,8 +39,10 @@ export const recoverGuestReadings = async (base: Reading[], draft: Reading[], sa
         undefined,
         reserved,
       );
-      recovered.set(id, { ...reading, id });
+      recovered.set(id, assignReadingId(reading, id));
     }
   }
-  return [...recovered.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return [...recovered.values()].sort(
+    (a, b) => readingEpoch(b.createdAt) - readingEpoch(a.createdAt),
+  );
 };

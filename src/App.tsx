@@ -27,11 +27,13 @@ import {
   sameReadingContent,
 } from './domain/journalBackup';
 import {
+  clearGuestHistory,
   formatReading,
   freshData,
   guestSaveWarning,
   loadData,
   saveData,
+  STORAGE_KEY,
   type AppData,
 } from './domain/storage';
 import {
@@ -41,10 +43,13 @@ import {
   observeJournalLock,
   lockJournal,
   exportAccountJournal,
+  reviewAccountClear,
   checkReadingsForPendingDeletions,
   previewAccountImport,
   importAccountReadings,
   type JournalUser,
+  type AccountClearReview,
+  type WatchExportHistory,
 } from './cloud/journal';
 import { useAccountJournal } from './useAccountJournal';
 import { checkSiblingRecovery } from './cloud/journalActivity';
@@ -179,6 +184,7 @@ function JournalSession({
     };
   }, [journalUid, getDeviceCount]);
   const [warning, setWarning] = useState(initial.warning);
+  const [guestClearStatus, setGuestClearStatus] = useState('');
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
   const navigate = useNavigate();
@@ -186,6 +192,11 @@ function JournalSession({
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Reading | 'all' | null>(null);
+  const guestClearTargets = useRef<Reading[]>([]);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const invalidateDownloads = () => setHistoryRevision((value) => value + 1);
+  const [clearReview, setClearReview] = useState<AccountClearReview | null>(null);
+  const [clearReviewError, setClearReviewError] = useState('');
   const [copyText, setCopyText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [offline, setOffline] = useState<'checking' | 'ready' | 'unavailable' | 'error'>(
@@ -203,6 +214,65 @@ function JournalSession({
   const revealedCount = reading?.revealed.filter(Boolean).length ?? 0;
 
   useEffect(() => {
+    if (journalUid) return;
+    let active = true;
+    const refreshGuest = async () => {
+      // A pending local draw/reveal may still be waiting for the guest write lock.
+      // Reconcile the saved result after this tab has finished all queued edits.
+      let writes;
+      do {
+        writes = waitForGuestWrites();
+        await writes;
+      } while (active && writes !== waitForGuestWrites());
+      if (!active) return;
+      const stored = loadData();
+      if (stored.warning) {
+        setWarning(stored.warning);
+        return;
+      }
+      if (guestDraft.current) {
+        if (guestDraftConflicts(guestDraft.current, stored)) {
+          setWarning(guestConflictMessage);
+          setHistoryRevision((value) => value + 1);
+        }
+        return;
+      }
+      const view = dataRef.current;
+      if (JSON.stringify(view.readings) === JSON.stringify(stored.data.readings)) return;
+      const selected = view.readings.find(({ id }) => id === view.activeId);
+      const keepSelected =
+        selected &&
+        stored.data.readings.some(
+          (item) => item.id === selected.id && sameReadingContent(item, selected),
+        );
+      const next = {
+        ...view,
+        readings: stored.data.readings,
+        activeId: keepSelected ? view.activeId : null,
+      };
+      dataRef.current = next;
+      setData(next);
+      drawLocked.current = Boolean(next.activeId) || next.awaitingNewReading;
+      setGuestClearStatus('');
+      setHistoryRevision((value) => value + 1);
+      if (selected && !keepSelected) {
+        setDetails(null);
+        setCopyText(null);
+      }
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY || event.key === null) void refreshGuest();
+    };
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('pageshow', refreshGuest);
+    return () => {
+      active = false;
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pageshow', refreshGuest);
+    };
+  }, [journalUid, guestDraft]);
+
+  useEffect(() => {
     setDetails(null);
     setConfirmDelete(null);
     setCopyText(null);
@@ -210,10 +280,36 @@ function JournalSession({
   }, [pathname, locked]);
 
   useEffect(() => {
+    setClearReview(null);
+    setClearReviewError('');
+    if (confirmDelete !== 'all') guestClearTargets.current = [];
+    if (confirmDelete !== 'all' || !journalUid || locked) return;
+    let active = true;
+    void reviewAccountClear(journalUid).then(
+      (review) => {
+        if (active) setClearReview(review);
+      },
+      (error: unknown) => {
+        if (active)
+          setClearReviewError(
+            error instanceof Error ? error.message : 'Could not load your journal.',
+          );
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [confirmDelete, journalUid, locked]);
+
+  useEffect(() => {
     if (!confirmDelete || confirmDelete === 'all') return;
     const current = readings.find(({ id }) => id === confirmDelete.id);
-    if (!current || !sameReadingContent(current, confirmDelete)) setConfirmDelete(null);
-  }, [confirmDelete, readings]);
+    if (!current || !sameReadingContent(current, confirmDelete)) {
+      setConfirmDelete(null);
+      if (!journalUid)
+        setWarning('This reading changed in another tab. Review the journal and confirm again.');
+    }
+  }, [confirmDelete, readings, journalUid]);
 
   useEffect(
     () =>
@@ -245,6 +341,14 @@ function JournalSession({
     const draft = guestDraft.current;
     return draft ? { data: draft.data, warning: '' } : loadData();
   };
+  const showGuestChange = (next: AppData, view: AppData, version: number) => {
+    // Another tab's selection is saved with the shared journal. Keep this
+    // tab's selection if its reading survived and the user has not moved on.
+    if (version !== guestViewVersion.current) return;
+    const activeId = next.readings.some((item) => item.id === view.activeId) ? view.activeId : null;
+    showData({ ...view, readings: next.readings, activeId });
+    drawLocked.current = Boolean(activeId) || view.awaitingNewReading;
+  };
   const saveGuestChange = (
     stored: ReturnType<typeof loadData>,
     change: GuestChange,
@@ -260,15 +364,8 @@ function JournalSession({
       : storageIssue || (stored.storageUnavailable ? guestSaveWarning : saveData(next));
     guestDraft.current = issue ? { data: next, base: draft?.base ?? current } : null;
     setWarning(issue);
-    // Another tab's selected spread is part of its saved state. Keep this tab
-    // on the spread the user was viewing when they made the edit.
-    if (version === guestViewVersion.current) {
-      const activeId = next.readings.some((item) => item.id === view.activeId)
-        ? view.activeId
-        : null;
-      showData({ ...view, readings: next.readings, activeId });
-      drawLocked.current = Boolean(activeId) || view.awaitingNewReading;
-    }
+    setGuestClearStatus('');
+    showGuestChange(next, view, version);
     return issue;
   };
   const commit = (change: GuestChange) => {
@@ -323,7 +420,10 @@ function JournalSession({
           );
       };
       await checkOtherTabs();
-      let json = await exportAccountJournal(journalUid, allowUncheckedDeletions);
+      let watchHistory: WatchExportHistory | undefined;
+      let json = await exportAccountJournal(journalUid, allowUncheckedDeletions, (watch) => {
+        watchHistory = watch;
+      });
       const cloudReadings = parseJournalBackup(json);
       const recovery = account.getRecoveryForExport();
       if (!recovery.complete)
@@ -345,7 +445,11 @@ function JournalSession({
       }
       await checkOtherTabs();
       // An isolated or suspended tab may be unable to advertise memory-only readings.
-      return { json, scope: allowUncheckedDeletions ? 'unchecked-deletions' : 'cloud-and-tab' };
+      return {
+        json,
+        scope: allowUncheckedDeletions ? 'unchecked-deletions' : 'cloud-and-tab',
+        watchHistory,
+      };
     }
     const json = await createJournalBackup(async () => ({
       readings: await guestReadingsForTransfer(),
@@ -403,6 +507,7 @@ function JournalSession({
           guestDraft.current = null;
           setWarning('');
         }
+        setGuestClearStatus('');
         const view = dataRef.current;
         const activeId = next.readings.some((item) => item.id === view.activeId)
           ? view.activeId
@@ -501,27 +606,35 @@ function JournalSession({
     }
     if (journalUid) {
       const target = confirmDelete === 'all' ? undefined : confirmDelete;
+      if (!target && !clearReview) return;
+      const previousActive = dataRef.current.activeId;
       setConfirmDelete(null);
+      invalidateDownloads();
       try {
-        await account.remove(target?.id, target);
-        if (!target || dataRef.current.activeId === target.id) {
+        await account.remove(target?.id, target, clearReview ?? undefined);
+        if ((target?.id ?? previousActive) === dataRef.current.activeId) {
           commit((current) => ({ ...current, activeId: null }));
         }
       } catch {
         /* The journal displays the cloud error and permits another attempt. */
+      } finally {
+        // A multi-page clear can stop after committing some of its deletions.
+        invalidateDownloads();
       }
       return;
     }
-    const targets = confirmDelete === 'all' ? dataRef.current.readings : [confirmDelete];
+    const targets = confirmDelete === 'all' ? guestClearTargets.current : [confirmDelete];
     const confirmed = new Map(targets.map((item) => [item.id, item]));
     const view = dataRef.current;
     const version = ++guestViewVersion.current;
     setConfirmDelete(null);
+    invalidateDownloads();
+    setGuestClearStatus('');
     await withGuestWrite(
       () => {
         const stored = loadData(view);
         const latest = guestDraft.current ? { data: guestDraft.current.data, warning: '' } : stored;
-        if (latest.warning) {
+        if (confirmDelete === 'all' ? stored.storageUnavailable : latest.warning) {
           setWarning(
             'The saved journal could not be read. Restore storage access and confirm the deletion again.',
           );
@@ -546,15 +659,48 @@ function JournalSession({
             : null;
           return { ...current, readings: remaining, activeId };
         };
-        const issue = saveGuestChange(stored, removeConfirmed, removeConfirmed(view), version);
-        if (!issue && confirmDelete === 'all' && dataRef.current.readings.length)
-          setWarning('Readings added or replaced in another tab were kept.');
+        if (confirmDelete !== 'all') {
+          saveGuestChange(stored, removeConfirmed, removeConfirmed(view), version);
+          return;
+        }
+        let remaining = removeConfirmed(latest.data);
+        if (guestDraftConflicts(guestDraft.current, stored)) {
+          if (remaining.readings.length) {
+            setWarning(guestConflictMessage);
+            return;
+          }
+          // Every reading in this tab's draft was selected. Apply that selection
+          // to the latest saved journal so a sibling's other readings survive.
+          remaining = removeConfirmed(stored.data);
+        }
+        const outcome = clearGuestHistory(remaining);
+        if (outcome === 'journal-write-failed') {
+          setWarning(
+            'The guest journal could not be cleared. Restore browser storage access and try Clear History again.',
+          );
+          return;
+        }
+        guestDraft.current = null;
+        showGuestChange(remaining, view, version);
+        if (outcome === 'recovery-incomplete') {
+          setWarning(
+            'The selected guest readings were cleared. Some guest recovery copies may still be on this device. Restore browser storage access and try Clear History again.',
+          );
+          return;
+        }
+        setWarning('');
+        setGuestClearStatus(
+          remaining.readings.length
+            ? 'Guest recovery copies were cleared. Readings added or replaced in another tab were kept.'
+            : 'Guest history and its recovery copies were cleared from this device.',
+        );
       },
       () =>
         setWarning(
           'This browser could not coordinate the deletion with other tabs. Restore browser storage access and confirm again.',
         ),
     );
+    invalidateDownloads();
   };
   const copyReading = async () => {
     if (!reading) return;
@@ -928,8 +1074,12 @@ function JournalSession({
                 onLoadMore={account.loadMore}
                 onOpen={openReading}
                 onRequestDelete={setConfirmDelete}
-                onRequestClear={() => setConfirmDelete('all')}
+                onRequestClear={() => {
+                  if (!journalUid) guestClearTargets.current = dataRef.current.readings;
+                  setConfirmDelete('all');
+                }}
               >
+                {!journalUid && guestClearStatus && <p role="status">{guestClearStatus}</p>}
                 <AccountPanel
                   key={user?.uid ?? 'signed-out'}
                   user={user}
@@ -938,6 +1088,7 @@ function JournalSession({
                   onLock={account.trusted && journalUid ? () => lockJournal(journalUid) : undefined}
                 />
                 <JournalTransfer
+                  historyRevision={historyRevision}
                   accountEmail={journalUid ? (user?.email ?? null) : null}
                   recoveryReadings={account.recoveryReadings}
                   deletionStorageUnreadable={account.deletionStorageUnreadable}
@@ -1073,20 +1224,26 @@ function JournalSession({
           <p>
             {journalUid
               ? confirmDelete === 'all'
-                ? 'All readings in your account will be removed from every synced device.'
+                ? clearReview
+                  ? `This will remove the ${clearReview.documents.length} synced ${clearReview.documents.length === 1 ? 'reading' : 'readings'} reviewed here and the current unsynced readings in this browser. Account readings added or changed after review will be kept.`
+                  : clearReviewError || 'Checking the readings in your account…'
                 : account.isFailedDraw(confirmDelete.id)
                   ? 'This unsynced reading will be discarded from this tab.'
                   : 'This reading will be removed from your account and every synced device.'
               : confirmDelete === 'all'
-                ? 'All readings on this device will be removed.'
+                ? 'This clears the guest readings shown here, any unreadable guest history, and all guest recovery copies in this browser.'
                 : 'This reading will be removed from this device.'}{' '}
-            This cannot be undone.
+            {(confirmDelete !== 'all' || !journalUid || clearReview) && 'This cannot be undone.'}
           </p>
           <div className="modal-actions">
             <button className="button button-secondary" onClick={() => setConfirmDelete(null)}>
               Keep {confirmDelete === 'all' ? 'Readings' : 'Reading'}
             </button>
-            <button className="button button-danger" onClick={deleteReadings}>
+            <button
+              className="button button-danger"
+              disabled={Boolean(journalUid && confirmDelete === 'all' && !clearReview)}
+              onClick={deleteReadings}
+            >
               {confirmDelete === 'all' ? 'Clear All Readings' : 'Delete Reading'}
             </button>
           </div>

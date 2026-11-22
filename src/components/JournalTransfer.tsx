@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   backupNeedsSizeConfirmation,
   createJournalBackup,
@@ -8,6 +8,7 @@ import {
 } from '../domain/journalBackup';
 import type { Reading } from '../domain/types';
 import type { RecoveryCopy } from '../domain/readingRecovery';
+import type { WatchExportHistory } from '../cloud/journal';
 import { Modal } from './Modal';
 import './AccountPanel.css';
 
@@ -21,6 +22,7 @@ export interface ImportCounts {
 export interface JournalExport {
   json: string;
   scope: 'journal' | 'cloud-and-tab' | 'unchecked-deletions';
+  watchHistory?: WatchExportHistory;
 }
 
 interface SavedRecovery {
@@ -31,6 +33,7 @@ interface SavedRecovery {
 }
 
 interface Props {
+  historyRevision?: number;
   accountEmail: string | null;
   deviceCount: number | 'unsaved';
   recoveryReadings?: Reading[];
@@ -70,6 +73,7 @@ const readBackupFile = (file: File) =>
 const readingCount = (count: number) => `${count} ${count === 1 ? 'reading' : 'readings'}`;
 
 export const JournalTransfer = ({
+  historyRevision = 0,
   accountEmail,
   deviceCount,
   recoveryReadings = [],
@@ -95,91 +99,163 @@ export const JournalTransfer = ({
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [exportWarning, setExportWarning] = useState('');
+  const exportGeneration = useRef(0);
+  const objectUrl = useRef<{ url: string; revoke: () => void } | null>(null);
+  const lastActionWasExport = useRef(false);
+
+  const revokeDownload = useCallback(() => {
+    objectUrl.current?.revoke();
+    objectUrl.current = null;
+  }, []);
+  const invalidateExports = useCallback(() => {
+    exportGeneration.current++;
+    revokeDownload();
+    setDownload(null);
+    setExportWarning('');
+    if (lastActionWasExport.current) {
+      setStatus('');
+      setError('');
+      setBusy(false);
+    }
+  }, [revokeDownload]);
+  useLayoutEffect(() => {
+    invalidateExports();
+    // A document frozen in the back-forward cache retains its React tree.
+    // Expire its export before another tab can change the journal while it sleeps.
+    window.addEventListener('pagehide', invalidateExports);
+    return () => {
+      window.removeEventListener('pagehide', invalidateExports);
+      exportGeneration.current++;
+      revokeDownload();
+    };
+  }, [historyRevision, invalidateExports, revokeDownload]);
 
   useEffect(() => {
-    if (!download) return;
-    downloadLink.current?.click();
-    return () => {
-      window.setTimeout(() => URL.revokeObjectURL(download.url), 30_000);
-    };
+    if (download && objectUrl.current?.url === download.url) downloadLink.current?.click();
   }, [download]);
 
-  const run = async (message: string, action: () => Promise<void>) => {
+  const run = async (
+    message: string,
+    action: (current: () => boolean) => Promise<void>,
+    exporting = false,
+  ) => {
+    const generation = exportGeneration.current;
+    const current = () =>
+      !!fileInput.current && (!exporting || generation === exportGeneration.current);
+    lastActionWasExport.current = exporting;
     setBusy(true);
+    revokeDownload();
     setDownload(null);
     setStatus(message);
     setError('');
     try {
-      await action();
+      await action(current);
     } catch (cause) {
+      if (!current()) return;
       setStatus('');
       if (cause instanceof UncheckedDeletionsExportError) setExportWarning(cause.message);
       else
         setError(cause instanceof Error ? cause.message : 'The journal transfer could not finish.');
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   };
 
-  const prepareDownload = (json: string, fileScope: string, message: string) => {
+  const prepareDownload = (
+    json: string,
+    fileScope: string,
+    message: string,
+    watchHistory?: WatchExportHistory,
+  ) => {
     if (!fileInput.current) return;
+    const urls = window.URL;
+    const url = urls.createObjectURL(new Blob([json], { type: 'application/json' }));
+    const stop = watchHistory?.(() => {
+      if (objectUrl.current?.url === url) invalidateExports();
+    });
+    objectUrl.current = {
+      url,
+      revoke: () => {
+        stop?.();
+        urls.revokeObjectURL(url);
+      },
+    };
     setDownload({
-      url: URL.createObjectURL(new Blob([json], { type: 'application/json' })),
+      url,
       filename: `arcana-journal-${fileScope}${new Date().toISOString().slice(0, 10)}.json`,
     });
     setStatus(message);
   };
 
   const exportGuestJournal = () =>
-    run('Preparing your guest journal backup…', async () => {
-      const readings = await getDeviceReadings();
-      const json = await createJournalBackup(() => ({ readings, nextCursor: null }));
-      prepareDownload(json, 'guest-', `Guest backup ready for ${readingCount(readings.length)}.`);
-    });
+    run(
+      'Preparing your guest journal backup…',
+      async (current) => {
+        const readings = await getDeviceReadings();
+        const json = await createJournalBackup(() => ({ readings, nextCursor: null }));
+        if (current())
+          prepareDownload(
+            json,
+            'guest-',
+            `Guest backup ready for ${readingCount(readings.length)}.`,
+          );
+      },
+      true,
+    );
 
   const exportJournal = (source: 'journal' | 'available' | 'recovery') =>
-    run('Preparing your journal backup…', async () => {
-      const recovery =
-        source === 'recovery'
-          ? (getRecoveryForExport?.() ?? { readings: recoveryReadings, complete: recoveryComplete })
-          : null;
-      const partial = recovery?.complete === false;
-      if (partial && (recoveryComplete || !recovery.readings.length))
-        throw new Error(
-          'Some recovery copies could not be read. Check storage access before downloading your unsynced readings.',
-        );
-      if (recovery && !recovery.readings.length) {
-        setStatus('No readings are awaiting sync.');
-        return;
-      }
-      let json: string;
-      let fileScope = '';
-      let message = 'Your backup is ready.';
-      if (recovery) {
-        json = await createJournalBackup(async () => ({
-          readings: (await mergeJournalReadings([], recovery.readings)).readings,
-          nextCursor: null,
-        }));
-        fileScope = partial ? 'unsynced-partial-' : 'unsynced-';
-        message = partial
-          ? `Partial backup ready for ${readingCount(recovery.readings.length)}. Other recovery copies could not be read.`
-          : `Backup ready for ${readingCount(recovery.readings.length)} awaiting sync.`;
-      } else {
-        const result = await onExport(source === 'available');
-        if (source === 'journal') setExportWarning('');
-        json = result.json;
-        if (result.scope === 'unchecked-deletions') {
-          fileScope = 'cloud-and-this-tab-unchecked-deletions-';
-          message =
-            'This backup contains cloud readings and recovery copies available in this tab. It may include readings waiting to be deleted.';
-        } else if (result.scope === 'cloud-and-tab') {
-          fileScope = 'cloud-and-this-tab-';
-          message =
-            'Backup includes cloud readings and recovery copies available in this tab. Other tabs may have unsynced readings.';
+    run(
+      'Preparing your journal backup…',
+      async (current) => {
+        const recovery =
+          source === 'recovery'
+            ? (getRecoveryForExport?.() ?? {
+                readings: recoveryReadings,
+                complete: recoveryComplete,
+              })
+            : null;
+        const partial = recovery?.complete === false;
+        if (partial && (recoveryComplete || !recovery.readings.length))
+          throw new Error(
+            'Some recovery copies could not be read. Check storage access before downloading your unsynced readings.',
+          );
+        if (recovery && !recovery.readings.length) {
+          setStatus('No readings are awaiting sync.');
+          return;
         }
-      }
-      prepareDownload(json, fileScope, message);
-    });
+        let json: string;
+        let watchHistory: WatchExportHistory | undefined;
+        let fileScope = '';
+        let message = 'Your backup is ready.';
+        if (recovery) {
+          json = await createJournalBackup(async () => ({
+            readings: (await mergeJournalReadings([], recovery.readings)).readings,
+            nextCursor: null,
+          }));
+          fileScope = partial ? 'unsynced-partial-' : 'unsynced-';
+          message = partial
+            ? `Partial backup ready for ${readingCount(recovery.readings.length)}. Other recovery copies could not be read.`
+            : `Backup ready for ${readingCount(recovery.readings.length)} awaiting sync.`;
+        } else {
+          const result = await onExport(source === 'available');
+          if (!current()) return;
+          if (source === 'journal') setExportWarning('');
+          json = result.json;
+          watchHistory = result.watchHistory;
+          if (result.scope === 'unchecked-deletions') {
+            fileScope = 'cloud-and-this-tab-unchecked-deletions-';
+            message =
+              'This backup contains cloud readings and recovery copies available in this tab. It may include readings waiting to be deleted.';
+          } else if (result.scope === 'cloud-and-tab') {
+            fileScope = 'cloud-and-this-tab-';
+            message =
+              'Backup includes cloud readings and recovery copies available in this tab. Other tabs may have unsynced readings.';
+          }
+        }
+        if (current()) prepareDownload(json, fileScope, message, watchHistory);
+      },
+      true,
+    );
 
   const previewImport = (
     source: string,
@@ -265,8 +341,10 @@ export const JournalTransfer = ({
                 window.confirm(
                   'Discard these recovery copies from this browser? Unsynced readings could be lost.',
                 )
-              )
+              ) {
                 savedRecovery.discard();
+                invalidateExports();
+              }
             }}
           >
             Discard recovery copies

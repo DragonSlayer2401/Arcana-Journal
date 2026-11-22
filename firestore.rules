@@ -48,8 +48,9 @@ service cloud.firestore {
           && (count > 9 || !slots.hasAny([9]));
       }
       function validReading(r) {
-        return r.keys().hasOnly(['id','createdAt','createdAtMs','question','cardIds','orientations','revealedSlots'])
+        return r.keys().hasOnly(['id','sourceId','createdAt','createdAtMs','question','cardIds','orientations','revealedSlots'])
           && r.id is string && r.id.size() > 0
+          && (!('sourceId' in r) || (r.sourceId is string && r.sourceId.size() > 0))
           && readingId == hashing.sha256(r.id.toUtf8()).toHexString().lower()
           && r.createdAt is string && r.createdAtMs is int && r.question is string
           && r.cardIds is list && r.cardIds.size() >= 1 && r.cardIds.size() <= 10

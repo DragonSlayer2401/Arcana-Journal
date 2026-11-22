@@ -33,7 +33,7 @@ export const JournalPage = ({
         <p className="eyebrow">{account ? 'ACCOUNT JOURNAL' : 'ON THIS DEVICE'}</p>
         <h1>Your reading journal.</h1>
       </div>
-      {readings.length > 0 && (
+      {(!account || readings.length > 0) && (
         <button className="button button-secondary" onClick={onRequestClear}>
           <Icon name="trash" />
           Clear History

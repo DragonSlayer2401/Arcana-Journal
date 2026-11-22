@@ -1,4 +1,5 @@
 import { CARD_BY_ID } from '../data/deck';
+import { readingEpoch } from './readingDate';
 import type { Reading, Settings } from './types';
 
 export const STORAGE_KEY = 'stilllight.tarot.v1';
@@ -22,9 +23,10 @@ export const isReading = (value: unknown): value is Reading => {
   const r = value as Reading;
   return (
     typeof r.id === 'string' &&
+    (r.sourceId === undefined || (typeof r.sourceId === 'string' && r.sourceId.trim() !== '')) &&
     typeof r.question === 'string' &&
     typeof r.createdAt === 'string' &&
-    Number.isFinite(Date.parse(r.createdAt)) &&
+    Number.isFinite(readingEpoch(r.createdAt)) &&
     Array.isArray(r.cards) &&
     r.cards.length >= 1 &&
     r.cards.length <= 10 &&
@@ -82,6 +84,48 @@ export const loadData = (
     };
   }
 };
+const writeGuestData = (raw: string) => {
+  localStorage.setItem(STORAGE_KEY, raw);
+  lastValidRaw = raw;
+};
+
+// The caller holds the guest write lock. A confirmed clear must never archive
+// the old journal again, including when its saved format cannot be read.
+export const clearGuestHistory = (remaining: AppData) => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    const raw = JSON.stringify(remaining);
+    // A journal containing only recovery copies needs no new storage space to clear.
+    if ((saved ?? JSON.stringify(freshData())) !== raw) writeGuestData(raw);
+  } catch {
+    return 'journal-write-failed';
+  }
+  try {
+    // Collect first: removing a key shifts the remaining localStorage indices.
+    const keys: string[] = [];
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (
+        key === RECOVERY_KEY ||
+        (key?.startsWith(RECOVERY_KEY + '.') && /^\d+$/.test(key.slice(RECOVERY_KEY.length + 1)))
+      )
+        keys.push(key);
+    }
+    let complete = true;
+    for (const key of keys) {
+      try {
+        localStorage.removeItem(key);
+        if (localStorage.getItem(key) !== null) complete = false;
+      } catch {
+        complete = false;
+      }
+    }
+    return complete ? 'cleared' : 'recovery-incomplete';
+  } catch {
+    return 'recovery-incomplete';
+  }
+};
+
 export const saveData = (data: AppData): string => {
   try {
     const existing = localStorage.getItem(STORAGE_KEY);
@@ -103,9 +147,7 @@ export const saveData = (data: AppData): string => {
         }
       }
     }
-    const raw = JSON.stringify(data);
-    localStorage.setItem(STORAGE_KEY, raw);
-    lastValidRaw = raw;
+    writeGuestData(JSON.stringify(data));
     return '';
   } catch {
     return guestSaveWarning;

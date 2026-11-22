@@ -1,4 +1,5 @@
 import {
+  assignReadingId,
   findImportTarget,
   mergeReveals,
   resolveImportReading,
@@ -452,7 +453,7 @@ export const combineReadingCopies = (
   for (const copy of copies) {
     // Restore at the last assigned ID. Import checks immutable content before
     // merging reveals, even if that destination has since been replaced.
-    const reading = copy.importedAs ? { ...copy.reading, id: copy.importedAs } : copy.reading;
+    const reading = copy.importedAs ? assignReadingId(copy.reading, copy.importedAs) : copy.reading;
     const variants = byId.get(reading.id) ?? [];
     const match = variants.findIndex((previous) => sameReadingContent(previous, reading));
     if (match < 0) variants.push(reading);

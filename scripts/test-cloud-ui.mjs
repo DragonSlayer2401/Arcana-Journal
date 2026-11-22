@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { chromium, expect, webkit } from '@playwright/test';
 import { createServer } from 'vite';
 import { verifyEmulatorEmail } from './emulator-email.mjs';
+import { testPortableJournals } from './portable-journal-workflows.mjs';
 
 const withApp =
   (run, browserType = chromium) =>
@@ -129,6 +132,130 @@ const deleteFromJournal = async (page, reading) => {
   await page.getByRole('dialog').getByRole('button', { name: 'Delete Reading' }).click();
   await expect(page.getByRole('heading', { name: reading.question })).toHaveCount(0);
 };
+
+testPortableJournals({ withApp, authenticate, importReadings, downloadReadings });
+
+test(
+  'a two-browser clear keeps later draws and reused IDs after deleting its first page',
+  { timeout: 60000 },
+  withApp(async (base, browser) => {
+    const first = await browser.newPage();
+    const second = await browser.newPage();
+    const email = 'confirmed-clear-' + randomUUID() + '@example.test';
+    const password = randomUUID();
+    await authenticate(base, first, email, password, { signup: true });
+    await authenticate(base, second, email, password);
+    const hash = (id) => createHash('sha256').update(id).digest('hex');
+    const archive = Array.from({ length: 103 }, (_, i) => ({
+      id: 'archive-' + i,
+      createdAt: '2026-01-02T10:00:00.000Z',
+      question: 'Archived reading ' + i,
+      cards: [{ cardId: 'major-00', orientation: 'upright' }],
+      revealed: [false],
+    })).sort((a, b) => hash(a.id).localeCompare(hash(b.id)));
+    const uid = await second.evaluate(async (archive) => {
+      const { createReading, observeAccount } = await import('/src/cloud/journal.ts');
+      const uid = await new Promise((resolve) => {
+        const stop = observeAccount((user) => {
+          stop();
+          resolve(user.uid);
+        });
+      });
+      await Promise.all(archive.map((reading) => createReading(uid, reading)));
+      return uid;
+    }, archive);
+    await expect(first.getByRole('button', { name: 'Load older readings' })).toBeVisible();
+    await first.getByRole('button', { name: 'Clear History' }).click();
+    const confirm = first.getByRole('dialog').getByRole('button', { name: 'Clear All Readings' });
+    await expect(confirm).toBeEnabled();
+    await expect(first.getByRole('dialog')).toContainText('103 synced readings');
+    const afterReview = {
+      ...archive[0],
+      id: randomUUID(),
+      question: 'Saved while the confirmation was open',
+    };
+    await second.evaluate(
+      async ({ uid, reading }) => {
+        const { createReading } = await import('/src/cloud/journal.ts');
+        await createReading(uid, reading);
+      },
+      { uid, reading: afterReview },
+    );
+    assert.equal((await downloadReadings(second, 'Export journal')).length, 104);
+    const previousBackup = second.getByRole('link', { name: 'Download backup' });
+    await second.context().setOffline(true);
+    await expect(previousBackup).toBeVisible();
+
+    const committed = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let firstPage = true;
+    await first.route('**/documents:commit*', async (route) => {
+      const deletions = route
+        .request()
+        .postDataJSON()
+        ?.writes?.filter((write) => write.delete);
+      if (!firstPage || !deletions?.length) return route.continue();
+      firstPage = false;
+      const response = await route.fetch();
+      committed.resolve({ status: response.status(), count: deletions.length });
+      await release.promise;
+      await route.fulfill({ response });
+    });
+    try {
+      await confirm.click();
+      await expect.poll(() => firstPage, { timeout: 10000 }).toBe(false);
+      assert.deepEqual(await committed.promise, { status: 200, count: 100 });
+      await second.context().setOffline(false);
+      await expect(previousBackup).toHaveCount(0, { timeout: 20000 });
+      // Place the new draw beyond the old hash cursor so a moving scan would
+      // always delete it. The spread and its server write follow the normal UI.
+      let lateId;
+      do {
+        lateId = randomUUID();
+      } while (hash(lateId) < hash(archive[99].id));
+      await second.goto(base);
+      await second.getByLabel(/What’s on your mind/).fill('Drawn after the first page cleared');
+      await second.evaluate((id) => {
+        const original = crypto.randomUUID.bind(crypto);
+        crypto.randomUUID = () => {
+          crypto.randomUUID = original;
+          return id;
+        };
+      }, lateId);
+      await second.getByRole('button', { name: /Draw Cards/ }).click();
+      await second.getByRole('link', { name: /^Journal/ }).click();
+      await expect(
+        second.getByRole('heading', { name: 'Drawn after the first page cleared' }),
+      ).toBeVisible();
+      for (const original of archive.slice(100, 102)) await deleteFromJournal(second, original);
+      await expect(second.getByRole('button', { name: 'Sign out' })).toBeEnabled();
+      const replaced = { ...archive[100], question: 'New spread at an old ID' };
+      const recreated = archive[101];
+      await second.evaluate(
+        async ({ uid, readings }) => {
+          const { createReading } = await import('/src/cloud/journal.ts');
+          await Promise.all(readings.map((reading) => createReading(uid, reading)));
+        },
+        { uid, readings: [replaced, recreated] },
+      );
+      const checkedExport = second.getByRole('button', { name: 'Export journal', exact: true });
+      if (await checkedExport.isVisible()) await checkedExport.click();
+      const before = await downloadReadings(second, 'Export available readings');
+      const late = before.find((r) => r.id === lateId);
+      assert.ok(late, 'The draw from browser B must be on the server');
+      release.resolve();
+      await expect(first.getByRole('button', { name: 'Sign out' })).toBeEnabled();
+      const remaining = await downloadReadings(first, 'Export journal');
+      await expect(previousBackup).toHaveCount(0);
+      assert.deepEqual(
+        remaining.sort((a, b) => a.id.localeCompare(b.id)),
+        [afterReview, replaced, recreated, late].sort((a, b) => a.id.localeCompare(b.id)),
+      );
+    } finally {
+      release.resolve();
+    }
+  }),
+);
 
 const retainTabReading = (page, reading) =>
   page.evaluate(async (reading) => {
@@ -550,6 +677,22 @@ test(
     await expect(openReading(second)).toHaveCount(0);
     await openReading(first).click();
     await expect(first.getByRole('button', { name: /View card details/ })).toHaveCount(1);
+    await first.getByRole('link', { name: /^Journal/ }).click();
+    await first.getByRole('button', { name: 'Clear History' }).click();
+    await first.getByRole('button', { name: 'Clear All Readings' }).click();
+    await expect(
+      first.getByText('Guest history and its recovery copies were cleared from this device.'),
+    ).toBeVisible();
+    await first.reload();
+    await expect(openReading(first)).toHaveCount(0);
+    await first.getByRole('main').getByRole('link', { name: 'Sign in' }).click();
+    await authenticate(first, 'Sign in');
+    const accountReadings = await downloadReadings(first, 'Export journal');
+    assert.equal(accountReadings.length, 2);
+    assert.deepEqual(
+      accountReadings.find(({ question }) => question === 'A journal to bring along').revealed,
+      [true, true, false],
+    );
   }),
 );
 
@@ -870,7 +1013,7 @@ test(
     await context.setOffline(true);
     const backup = await downloadReadings(writer, 'Download unsynced readings');
     const updated = { ...assigned, revealed: [true] };
-    assert.deepEqual(backup, [updated]);
+    assert.deepEqual(backup, [{ ...updated, sourceId: original.id }]);
 
     await importReadings(
       reader,
@@ -1580,6 +1723,292 @@ test(
     await review.getByRole('button', { name: 'Confirm import' }).click();
     await expect(remote.getByRole('heading', { name: question })).toBeVisible();
     assert.deepEqual(await downloadReadings(remote, 'Export journal'), expected);
+  }),
+);
+
+const cacheNames = (page) =>
+  page.evaluate(async () =>
+    (await indexedDB.databases())
+      .map(({ name }) => name)
+      .filter((name) => name?.startsWith('firestore/journal-')),
+  );
+const cachedRows = (page, name, store) =>
+  page.evaluate(
+    async ({ name, store }) => {
+      const database = await new Promise((resolve, reject) => {
+        const open = indexedDB.open(name);
+        open.onupgradeneeded = () => open.transaction.abort();
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => resolve(open.result);
+      });
+      try {
+        return await new Promise((resolve, reject) => {
+          const read = database.transaction(store).objectStore(store).getAll();
+          read.onerror = () => reject(read.error);
+          read.onsuccess = () => resolve(read.result);
+        });
+      } finally {
+        database.close();
+      }
+    },
+    { name, store },
+  );
+const signOutFromJournal = async (page) => {
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('main').getByRole('link', { name: 'Sign in' })).toBeVisible();
+};
+
+test(
+  'withdrawing trust retries a blocked removal and erases only the selected cache across a browser restart',
+  withApp(async (base) => {
+    const directory = await mkdtemp(join(tmpdir(), 'arcana-trust-test-'));
+    let profile;
+    try {
+      profile = await chromium.launchPersistentContext(directory);
+      const page = await profile.newPage();
+      const email = 'withdraw-' + randomUUID() + '@example.test';
+      const password = randomUUID();
+      const reading = {
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        question: 'The other journal stays on this device',
+        cards: [{ cardId: 'major-00', orientation: 'upright' }],
+        revealed: [true],
+      };
+      await authenticate(base, page, 'other-' + email, password, { signup: true, trust: true });
+      await importReadings(page, [reading]);
+      const [otherCache] = await cacheNames(page);
+      await signOutFromJournal(page);
+      await authenticate(base, page, email, password, { signup: true, trust: true });
+      const target = {
+        ...reading,
+        id: randomUUID(),
+        question: 'Remove the offline copy of this reading',
+      };
+      await importReadings(page, [target]);
+      const cache = (await cacheNames(page)).find((name) => name !== otherCache);
+      assert.ok(cache && otherCache);
+      await signOutFromJournal(page);
+      // An older/suspended client can retain an IndexedDB connection after sign-out.
+      const sibling = await profile.newPage();
+      await sibling.goto(base + '/icon.svg');
+      await sibling.evaluate(
+        (name) =>
+          new Promise((resolve) => {
+            const open = indexedDB.open(name);
+            open.onsuccess = () => {
+              window.heldCache = open.result;
+              resolve();
+            };
+          }),
+        cache,
+      );
+      await authenticate(base, page, email, password);
+      await expect(page.getByRole('alert').filter({ hasText: /close those tabs/i })).toBeVisible();
+      await page.reload();
+      const retry = page.getByRole('button', { name: 'Retry offline journal removal' });
+      await expect(retry).toBeVisible();
+      await sibling.close();
+      await page.evaluate((cacheName) => {
+        const open = indexedDB.open.bind(indexedDB);
+        indexedDB.open = (name, ...args) => {
+          if (name === cacheName) {
+            indexedDB.open = open;
+            throw new Error('Opening this cache was denied');
+          }
+          return open(name, ...args);
+        };
+      }, cache);
+      await retry.click();
+      await expect(
+        page.getByRole('alert').filter({ hasText: /allow browser storage access/i }),
+      ).toBeVisible();
+      assert.ok((await cacheNames(page)).includes(cache));
+      await retry.click();
+      await expect(retry).toHaveCount(0);
+      assert.deepEqual(await downloadReadings(page, 'Export journal'), [target]);
+      assert.deepEqual(await cacheNames(page), [otherCache]);
+      await profile.close();
+      profile = await chromium.launchPersistentContext(directory);
+      const reopened = await profile.newPage();
+      await reopened.goto(base + '/journal');
+      await expect(reopened.getByRole('main').getByRole('link', { name: 'Sign in' })).toBeVisible();
+      assert.deepEqual(await cacheNames(reopened), [otherCache]);
+      assert.ok(
+        JSON.stringify(await cachedRows(reopened, otherCache, 'remoteDocumentsV14')).includes(
+          reading.question,
+        ),
+      );
+    } finally {
+      await profile?.close();
+      const path = resolve(directory);
+      assert.equal(dirname(path), resolve(tmpdir()));
+      assert.ok(basename(path).startsWith('arcana-trust-test-'));
+      await rm(path, { recursive: true, force: true });
+    }
+  }),
+);
+
+test(
+  'withdrawing trust keeps an offline draw queued in Firestore until the owner syncs it',
+  withApp(async (base, browser) => {
+    const profile = await browser.newContext();
+    const writer = await profile.newPage();
+    const email = 'withdraw-queue-' + randomUUID() + '@example.test';
+    const password = randomUUID();
+    await authenticate(base, writer, email, password, { signup: true, trust: true });
+    const [cache] = await cacheNames(writer);
+    await writer.goto(base);
+    await expect(writer.getByLabel(/What’s on your mind/)).toBeVisible();
+    // A full Web Storage quota leaves Firestore as the only durable copy.
+    await writer.evaluate(() => {
+      const save = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (this === localStorage && key.startsWith('arcana.journal.recovery.'))
+          throw new DOMException('Full', 'QuotaExceededError');
+        return save.call(this, key, value);
+      };
+    });
+    await profile.setOffline(true);
+    const question = 'Keep my offline draw through device trust withdrawal';
+    await writer.getByLabel(/What’s on your mind/).fill(question);
+    await writer.getByRole('button', { name: /Draw Cards/ }).click();
+    await expect
+      .poll(async () => (await cachedRows(writer, cache, 'mutations')).length)
+      .toBeGreaterThan(0);
+    await writer.close();
+    await profile.setOffline(false);
+    const page = await profile.newPage();
+    // Model an expired/removed login on reopening. Leave the cached SDK write intact.
+    await page.goto(base + '/icon.svg');
+    await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((key) => key.startsWith('firebase:authUser:'));
+      if (!key) throw new Error('Trusted login missing from test fixture');
+      localStorage.removeItem(key);
+    });
+    await authenticate(base, page, email, password);
+    await expect(page.getByRole('alert').filter({ hasText: /sync or recover/i })).toBeVisible();
+    await page.getByRole('button', { name: 'Retry offline journal removal' }).click();
+    assert.ok((await cachedRows(page, cache, 'mutations')).length);
+    await signOutFromJournal(page);
+    await authenticate(base, page, email, password, { trust: true });
+    await expect(page.getByRole('heading', { name: question })).toBeVisible();
+    await expect.poll(async () => (await cachedRows(page, cache, 'mutations')).length).toBe(0);
+    await signOutFromJournal(page);
+    await authenticate(base, page, email, password);
+    assert.deepEqual(await cacheNames(page), []);
+    const exported = await downloadReadings(page, 'Export journal');
+    assert.deepEqual(
+      exported.map(({ question }) => question),
+      [question],
+    );
+  }),
+);
+
+test(
+  'a restored memory-only session checks legacy caches and preserves a later trusted grant until confirmed',
+  withApp(async (base, browser) => {
+    const profile = await browser.newContext();
+    const session = await profile.newPage();
+    const email = 'restored-opt-out-' + randomUUID() + '@example.test';
+    const password = randomUUID();
+    await authenticate(base, session, email, password, { signup: true });
+    await session.reload();
+    await expect(session.getByRole('heading', { name: email })).toBeVisible();
+    const trusted = await profile.newPage();
+    await authenticate(base, trusted, email, password, { trust: true });
+    const reading = {
+      id: randomUUID(),
+      question: 'A newer trusted journal',
+      createdAt: new Date().toISOString(),
+      cards: [{ cardId: 'major-00', orientation: 'upright' }],
+      revealed: [false],
+    };
+    await importReadings(trusted, [reading]);
+    const [cache] = await cacheNames(trusted);
+    assert.ok(cache);
+    await signOutFromJournal(trusted);
+    await session.reload();
+    await expect(session.getByRole('heading', { name: reading.question })).toBeVisible();
+    const retry = session.getByRole('button', { name: 'Retry offline journal removal' });
+    await expect(retry).toHaveCount(0);
+    assert.deepEqual(await cacheNames(session), [cache]);
+
+    // Older session credentials predate offline-removal receipts. Reopening
+    // must surface the existing cache without assuming it predates this login.
+    await session.evaluate(() => {
+      const receipt = Object.keys(sessionStorage).find((key) =>
+        key.startsWith('arcana.journal.offline-removal:'),
+      );
+      if (!receipt) throw new Error('Memory-only login receipt missing');
+      sessionStorage.removeItem(receipt);
+    });
+    await session.reload();
+    await expect(
+      session.getByRole('alert').filter({ hasText: /offline journal from a trusted sign-in/i }),
+    ).toBeVisible();
+    assert.deepEqual(await cacheNames(session), [cache]);
+    // Policy can change after the cache has been opened. A synchronous
+    // deletion error must release its handle and allow a subsequent retry.
+    await session.evaluate((cache) => {
+      const remove = indexedDB.deleteDatabase.bind(indexedDB);
+      indexedDB.deleteDatabase = (name) => {
+        if (name === cache) {
+          indexedDB.deleteDatabase = remove;
+          throw new DOMException('Blocked', 'SecurityError');
+        }
+        return remove(name);
+      };
+    }, cache);
+    await retry.click();
+    await expect(
+      session.getByRole('alert').filter({ hasText: /allow browser storage access/i }),
+    ).toBeVisible();
+    await retry.click();
+    await expect(retry).toHaveCount(0);
+    assert.deepEqual(await cacheNames(session), []);
+    assert.deepEqual(await downloadReadings(session, 'Export journal'), [reading]);
+  }),
+);
+
+test(
+  'retrying offline removal keeps account recovery hidden until the verification token can be checked',
+  withApp(async (base, browser) => {
+    const page = await browser.newPage();
+    const email = 'retry-token-' + randomUUID() + '@example.test';
+    await authenticate(base, page, email, randomUUID(), { signup: true });
+    await page.evaluate(() => {
+      const key = Object.keys(sessionStorage).find((key) => key.startsWith('firebase:authUser:'));
+      const record = JSON.parse(sessionStorage.getItem(key));
+      record.stsTokenManager.expirationTime = Date.now() - 1000;
+      sessionStorage.setItem(key, JSON.stringify(record));
+      sessionStorage.removeItem('arcana.journal.offline-removal:' + record.uid);
+      localStorage.setItem(
+        'arcana.journal.recovery.v1:' + record.uid + ':' + crypto.randomUUID(),
+        JSON.stringify({
+          id: crypto.randomUUID(),
+          question: 'Private pending reading',
+          createdAt: new Date().toISOString(),
+          cards: [{ cardId: 'major-00', orientation: 'upright' }],
+          revealed: [false],
+        }),
+      );
+    });
+    const authRequests = 'http://127.0.0.1:9099/**';
+    await page.route(authRequests, (route) => route.abort('internetdisconnected'));
+    await page.reload();
+    const guest = page.getByText('Your readings are saved in the guest journal on this device.');
+    const retry = page.getByRole('button', { name: 'Retry offline journal removal' });
+    const recover = page.getByRole('button', { name: 'Recover unsynced readings' });
+    await expect(guest).toBeVisible();
+    await expect(recover).toHaveCount(0);
+    await retry.click();
+    await expect(retry).toBeEnabled();
+    await expect(guest).toBeVisible();
+    await expect(recover).toHaveCount(0);
+    await page.unroute(authRequests);
+    await page.getByRole('button', { name: 'Check verification' }).click();
+    await expect(recover).toBeVisible();
   }),
 );
 

@@ -5,12 +5,13 @@ export const accountError = (
   const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : '';
   switch (code) {
     case 'auth/user-not-found':
+    case 'auth/user-disabled':
     case 'auth/wrong-password':
     case 'auth/invalid-login-credentials':
     case 'auth/invalid-credential':
       return credentialMessage;
     case 'auth/email-already-in-use':
-      return 'This email already has an account. Sign in or reset your password.';
+      return 'We couldn’t create an account with those details. Try signing in or resetting your password.';
     case 'auth/invalid-email':
       return 'Enter a valid email address.';
     case 'auth/weak-password':

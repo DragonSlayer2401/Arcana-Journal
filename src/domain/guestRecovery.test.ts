@@ -22,7 +22,11 @@ it('keeps a replacement with a reused ID and preserves every explicit ID when na
   const result = await recoverGuestReadings([original], [edited], [replacement, separate]);
   expect(result).toHaveLength(3);
   expect(result).toEqual(
-    expect.arrayContaining([replacement, separate, { ...edited, id: alternate + '-1' }]),
+    expect.arrayContaining([
+      replacement,
+      separate,
+      { ...edited, id: alternate + '-1', sourceId: edited.id },
+    ]),
   );
 });
 

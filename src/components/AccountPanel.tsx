@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   refreshAccount,
+  retryOfflineRemoval,
   sendVerification,
   signOutAccount,
   type JournalUser,
@@ -82,6 +83,20 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled, onLock }: Prop
           You can lock offline while changes wait to sync. Reconnect and enter your password to
           unlock.
         </p>
+      )}
+      {user?.offlineRemoval && (
+        <div>
+          <p className="notice warning" role="alert">
+            {user.offlineRemoval}
+          </p>
+          <button
+            className="text-button"
+            disabled={busy}
+            onClick={() => void run(() => retryOfflineRemoval(user.uid))}
+          >
+            Retry offline journal removal
+          </button>
+        </div>
       )}
       {user && !user.emailVerified && (
         <div className="account-verification">

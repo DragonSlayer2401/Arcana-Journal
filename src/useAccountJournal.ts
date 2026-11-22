@@ -11,6 +11,7 @@ import {
   readDeletionTarget,
   removeReading,
   revealCards,
+  type AccountClearReview,
 } from './cloud/journal';
 import type { Reading } from './domain/types';
 import type { PendingDeletion } from './cloud/deletionQueue';
@@ -66,6 +67,13 @@ interface FailedReveal {
   reading: Reading;
   indexes: Set<number>;
   error: string;
+}
+
+interface ConfirmedLocalClear {
+  recoveryKeys: Set<string>;
+  drafts: Map<UnsavedDraw, Reading>;
+  failedReveals: Map<FailedReveal, Reading>;
+  submit: (onPageSubmitted: () => void) => Promise<void>;
 }
 
 // Mounted separately for each account, so a late response cannot replace another user's journal.
@@ -372,7 +380,7 @@ export const useAccountJournal = (
   const removeConfirmed = async (
     id: string | undefined,
     confirmedReading?: Reading,
-    submitClear?: (onPageSubmitted: () => void) => Promise<void>,
+    clear?: ConfirmedLocalClear,
   ) => {
     if (!uid) return;
     setDeleteError('');
@@ -403,7 +411,7 @@ export const useAccountJournal = (
     let keys: string[];
     let restore: () => void;
     try {
-      let matched = copies;
+      let matched = clear ? copies.filter(({ key }) => clear.recoveryKeys.has(key)) : copies;
       if (id !== undefined) {
         if (target && id.startsWith('import-')) {
           matched = await resolvedRecoveryCopies(
@@ -465,7 +473,6 @@ export const useAccountJournal = (
       refreshWrites();
       return;
     }
-    const localAtConfirmation = Array.from(drafts.entries());
     // A confirmed single delete can be queued offline. Withdraw its backup now
     // so closing the tab before acknowledgment cannot offer that reading again.
     if (target) deleting.add(target);
@@ -475,8 +482,8 @@ export const useAccountJournal = (
     try {
       await trackWrite(
         () =>
-          submitClear
-            ? submitClear(() => {
+          clear
+            ? clear.submit(() => {
                 submittedPage = true;
               })
             : removeReading(uid, target!),
@@ -484,12 +491,15 @@ export const useAccountJournal = (
         target ?? undefined,
       );
       discardCopies(keys.flatMap(recoveryKeysForCopy));
-      if (id === undefined) {
-        for (const [key, draft] of localAtConfirmation) {
-          if (draft.error && drafts.get(key) === draft) drafts.delete(key);
+      if (clear) {
+        for (const [draft, confirmed] of clear.drafts) {
+          if (draft.error && draft.reading === confirmed && drafts.get(confirmed.id) === draft)
+            drafts.delete(confirmed.id);
         }
-        failedReveals.clear();
-      } else {
+        for (const [failed, confirmed] of clear.failedReveals) {
+          if (failed.reading === confirmed) failedReveals.delete(failed);
+        }
+      } else if (id !== undefined) {
         if (matchesDraft) drafts.delete(id);
         if (target) clearFailedReveal(target);
       }
@@ -508,11 +518,25 @@ export const useAccountJournal = (
     }
   };
 
-  const remove = async (id?: string, reading?: Reading) => {
+  const remove = async (id?: string, reading?: Reading, review?: AccountClearReview) => {
     if (!uid || id !== undefined) return removeConfirmed(id, reading);
     setDeleteError('');
     try {
-      await withClearPreparation(uid, (submit) => removeConfirmed(undefined, undefined, submit));
+      const latest = loadRecoveryCopies(uid);
+      if (!latest.complete)
+        throw new Error(
+          'Deletion could not start because this browser could not check every recovery copy. Allow browser storage, then choose the readings and confirm again.',
+        );
+      const local = {
+        recoveryKeys: new Set(availableCopies(latest).map(({ key }) => key)),
+        drafts: new Map(Array.from(drafts.values(), (draft) => [draft, draft.reading])),
+        failedReveals: new Map(Array.from(failedReveals, (failed) => [failed, failed.reading])),
+      };
+      await withClearPreparation(
+        uid,
+        (submit) => removeConfirmed(undefined, undefined, { ...local, submit }),
+        review,
+      );
     } catch (error) {
       // Registration can fail before the hook starts staging the recovery copies.
       setDeleteError((previous) => previous || messageOf(error));

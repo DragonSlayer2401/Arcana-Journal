@@ -1,4 +1,5 @@
 import { isReading } from './storage';
+import { readingEpoch } from './readingDate';
 import type { Reading } from './types';
 
 const BACKUP_VERSION = 1;
@@ -26,7 +27,8 @@ const appendReadings = (readings: Reading[], seenIds: Set<string>, values: unkno
     seenIds.add(value.id);
     readings.push({
       id: value.id,
-      createdAt: value.createdAt,
+      ...(value.sourceId && { sourceId: value.sourceId }),
+      createdAt: new Date(readingEpoch(value.createdAt)).toISOString(),
       question: value.question,
       cards: value.cards.map(({ cardId, orientation }) => ({ cardId, orientation })),
       revealed: [...value.revealed],
@@ -73,7 +75,7 @@ export const parseJournalBackup = (json: string): Reading[] => {
 };
 
 export const sameReadingContent = (left: Reading, right: Reading): boolean =>
-  Date.parse(left.createdAt) === Date.parse(right.createdAt) &&
+  readingEpoch(left.createdAt) === readingEpoch(right.createdAt) &&
   left.question === right.question &&
   left.cards.length === right.cards.length &&
   left.cards.every(
@@ -95,8 +97,8 @@ export const mergeReveals = (existing: Reading, incoming: Reading): Reading => {
 // repeatable alternate ID from the draw; revealing a card must never change that ID.
 export const collisionReadingId = async (reading: Reading, attempt = 0): Promise<string> => {
   const identity = JSON.stringify([
-    reading.id,
-    Date.parse(reading.createdAt),
+    reading.sourceId ?? reading.id,
+    readingEpoch(reading.createdAt),
     reading.question,
     reading.cards.map(({ cardId, orientation }) => [cardId, orientation]),
     attempt,
@@ -108,6 +110,40 @@ export const collisionReadingId = async (reading: Reading, attempt = 0): Promise
   return `import-${hex}`;
 };
 
+export const assignReadingId = (reading: Reading, id: string): Reading =>
+  id === reading.id ? reading : { ...reading, id, sourceId: reading.sourceId ?? reading.id };
+
+// Backups made before sourceId existed carry only the derived ID. A matching
+// original on the destination can prove that relationship by recomputing it.
+// Two explicitly listed copies of the same spread must remain independent.
+export const originalForLegacyAlternate = async (
+  source: Reading,
+  candidates: Reading[],
+  incomingById: ReadonlyMap<string, Reading>,
+) => {
+  if (source.sourceId || !/^import-[\da-f]{64}(?:-[1-9]\d*)?$/.test(source.id)) return;
+  let uncertain = false;
+  for (const candidate of candidates) {
+    if (
+      (candidate.sourceId && candidate.sourceId !== candidate.id) ||
+      candidate.id === source.id ||
+      !sameReadingContent(candidate, source)
+    )
+      continue;
+    const listed = incomingById.get(candidate.id);
+    if (!listed || sameReadingContent(listed, source)) continue;
+    uncertain = true;
+    const base = await collisionReadingId(candidate);
+    if (source.id === base || source.id.startsWith(base + '-')) return candidate;
+    if (source.id.length === base.length) {
+      for (let attempt = 1; attempt <= 64; attempt++) {
+        if (source.id === (await collisionReadingId(candidate, attempt))) return candidate;
+      }
+    }
+  }
+  if (uncertain) throw new Error(unverifiedImportMessage);
+};
+
 // New alternate IDs share the source fingerprint. This preserves the link even
 // when every earlier occupant has been deleted and no local receipt survives.
 export const unverifiedImportMessage =
@@ -117,16 +153,15 @@ export const findImportTarget = async (
   source: Reading,
   candidates: Reading[],
   requireCertain = false,
-  explicitIds?: ReadonlySet<string>,
+  explicitIds?: ReadonlyMap<string, Reading>,
 ) => {
-  const ids = new Set(
-    candidates
-      .filter(
-        (r) =>
-          r.id.startsWith('import-') && !explicitIds?.has(r.id) && sameReadingContent(r, source),
-      )
-      .map((r) => r.id),
-  );
+  const origin = source.sourceId ?? source.id;
+  const ids = new Set<string>();
+  for (const reading of candidates) {
+    if (explicitIds?.has(reading.id) || !sameReadingContent(reading, source)) continue;
+    if (reading.sourceId === origin) return reading.id;
+    if (!reading.sourceId && reading.id.startsWith('import-')) ids.add(reading.id);
+  }
   if (!ids.size) return undefined;
   const base = await collisionReadingId(source);
   if (ids.has(base)) return base;
@@ -149,14 +184,28 @@ export const resolveImportReading = async (
   source: Reading,
   lookup: (id: string) => Reading | undefined | Promise<Reading | undefined>,
   importedAs?: string,
-  explicitIds?: ReadonlySet<string>,
+  explicitIds?: ReadonlyMap<string, Reading>,
 ): Promise<{ id: string; existing: Reading | undefined }> => {
+  const origin = source.sourceId ?? source.id;
+  const matchesOrigin = (reading: Reading) =>
+    (!reading.sourceId || reading.sourceId === origin) && sameReadingContent(reading, source);
   const primary = await lookup(source.id);
-  if (primary && sameReadingContent(primary, source)) return { id: source.id, existing: primary };
+  // An older backup can name the assigned ID without carrying its origin.
+  if (primary && (source.sourceId ? matchesOrigin(primary) : sameReadingContent(primary, source)))
+    return { id: source.id, existing: primary };
+  const listedOriginal = source.sourceId && explicitIds?.get(source.sourceId);
+  if (
+    source.sourceId &&
+    importedAs !== source.id &&
+    (!listedOriginal || !sameReadingContent(listedOriginal, source))
+  ) {
+    const original = await lookup(source.sourceId);
+    if (original && matchesOrigin(original)) return { id: original.id, existing: original };
+  }
   // A receipt locates a past collision when the file's own ID is missing or occupied.
   if (importedAs && importedAs !== source.id && !explicitIds?.has(importedAs)) {
     const mapped = await lookup(importedAs);
-    if (mapped && sameReadingContent(mapped, source)) return { id: importedAs, existing: mapped };
+    if (mapped && matchesOrigin(mapped)) return { id: importedAs, existing: mapped };
   }
   const base = await collisionReadingId(source);
   let firstFree: string | undefined;
@@ -164,13 +213,13 @@ export const resolveImportReading = async (
     const alternateId = attempt ? `${base}-${attempt}` : base;
     const reserved = explicitIds?.has(alternateId);
     const alternate = await lookup(alternateId);
-    if (!reserved && alternate && sameReadingContent(alternate, source))
+    if (!reserved && alternate && matchesOrigin(alternate))
       return { id: alternateId, existing: alternate };
     if (!reserved && !alternate) firstFree ??= alternateId;
     if (attempt) {
       const previousId = await collisionReadingId(source, attempt);
       const previous = await lookup(previousId);
-      if (!explicitIds?.has(previousId) && previous && sameReadingContent(previous, source))
+      if (!explicitIds?.has(previousId) && previous && matchesOrigin(previous))
         return { id: previousId, existing: previous };
       if (previous) continue;
     }
@@ -185,37 +234,55 @@ export const mergeJournalReadings = async (
   assignedIds?: ReadonlySet<string>,
 ) => {
   const byId = new Map(existing.map((reading) => [reading.id, reading]));
-  const explicitIds = new Set(incoming.map((reading) => reading.id));
+  const incomingById = new Map(incoming.map((reading) => [reading.id, reading]));
+  const candidatesByDate = new Map<number, Reading[]>();
   const alternatesByDate = new Map<number, Reading[]>();
-  const indexAlternate = (reading: Reading) => {
-    if (!reading.id.startsWith('import-')) return;
-    const date = Date.parse(reading.createdAt);
+  const indexReading = (reading: Reading) => {
+    const date = readingEpoch(reading.createdAt);
+    const candidates = candidatesByDate.get(date) ?? [];
+    candidates.push(reading);
+    candidatesByDate.set(date, candidates);
+    if (!reading.sourceId && !reading.id.startsWith('import-')) return;
     const alternatives = alternatesByDate.get(date) ?? [];
     alternatives.push(reading);
     alternatesByDate.set(date, alternatives);
   };
-  existing.forEach(indexAlternate);
+  existing.forEach(indexReading);
   let added = 0;
   let skipped = 0;
   let updated = 0;
   for (const source of incoming) {
     // A local receipt already names its destination. An unrelated legacy ID
     // with the same spread should never prevent backing up that reading.
-    const alternatives = assignedIds?.has(source.id)
+    const assigned = assignedIds?.has(source.id);
+    const alternatives = assigned
       ? undefined
-      : alternatesByDate.get(Date.parse(source.createdAt));
+      : alternatesByDate.get(readingEpoch(source.createdAt));
     let target =
-      !alternatives && !byId.has(source.id)
+      !alternatives && !byId.has(source.id) && (assigned || !source.sourceId)
         ? { id: source.id, existing: undefined }
-        : await resolveImportReading(source, (id) => byId.get(id), undefined, explicitIds);
+        : await resolveImportReading(
+            source,
+            (id) => byId.get(id),
+            assigned ? source.id : undefined,
+            incomingById,
+          );
+    if (!target.existing && !assigned) {
+      const original = await originalForLegacyAlternate(
+        source,
+        candidatesByDate.get(readingEpoch(source.createdAt)) ?? [],
+        incomingById,
+      );
+      if (original) target = { id: original.id, existing: byId.get(original.id) };
+    }
     if (!target.existing && alternatives) {
-      const previousId = await findImportTarget(source, alternatives, true, explicitIds);
+      const previousId = await findImportTarget(source, alternatives, true, incomingById);
       if (previousId) target = { id: previousId, existing: byId.get(previousId) };
     }
     if (!target.existing) {
-      const addedReading = { ...source, id: target.id };
+      const addedReading = assignReadingId(source, target.id);
       byId.set(target.id, addedReading);
-      indexAlternate(addedReading);
+      indexReading(addedReading);
       added++;
       continue;
     }
@@ -228,7 +295,7 @@ export const mergeJournalReadings = async (
   }
   const readings =
     added || updated
-      ? [...byId.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      ? [...byId.values()].sort((a, b) => readingEpoch(b.createdAt) - readingEpoch(a.createdAt))
       : existing;
   return { readings, added, skipped, updated };
 };

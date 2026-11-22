@@ -10,7 +10,7 @@ import {
 } from './journalBackup';
 import type { Reading } from './types';
 
-const reading = (id: string, createdAt = '2026-11-19T11:23:45.678-06:00'): Reading => ({
+const reading = (id: string, createdAt = '2026-11-19T17:23:45.678Z'): Reading => ({
   id,
   createdAt,
   question: 'What’s next?\n今日 ✨',
@@ -48,6 +48,24 @@ describe('portable journal backups', () => {
   it('can export and restore an empty journal', async () => {
     const json = await createJournalBackup(() => ({ readings: [], nextCursor: null }));
     expect(parseJournalBackup(json)).toEqual([]);
+  });
+
+  it.each([
+    ['2026-11-19T11:23:45.678', '2026-11-19T11:23:45.678Z'],
+    ['2026-11-19 11:23:45', '2026-11-19T11:23:45.000Z'],
+    ['2026-11-19', '2026-11-19T00:00:00.000Z'],
+    ['2026-11-19T11:23:45.678-06:00', '2026-11-19T17:23:45.678Z'],
+    ['Fri, 02 Jan 2026 03:04:05 GMT+5:30', '2026-01-01T21:34:05.000Z'],
+    ['Fri, 02 Jan 2026 03:04:05 UTC+5', '2026-01-01T22:04:05.000Z'],
+    ['Fri, 02 Jan 2026 03:04:05 -7', '2026-01-02T10:04:05.000Z'],
+    ['Fri, 02 Jan 2026 03:04:05+530', '2026-01-01T21:34:05.000Z'],
+    ['Jan-02-26', '2026-01-02T00:00:00.000Z'],
+  ])('imports and exports %s as UTC', async (input, expected) => {
+    const original = reading('legacy-date', input);
+    const fromFile = parseJournalBackup(JSON.stringify({ version: 1, readings: [original] }));
+    const exported = await createJournalBackup(() => ({ readings: [original], nextCursor: null }));
+    expect(fromFile[0].createdAt).toBe(expected);
+    expect(JSON.parse(exported).readings[0].createdAt).toBe(expected);
   });
 
   it('propagates a later page failure without producing an incomplete backup', async () => {
@@ -161,6 +179,7 @@ describe('portable journal backups', () => {
     expect(alternate).toEqual({
       ...secondDraw,
       id: expect.stringMatching(/^import-[a-f0-9]{64}$/),
+      sourceId: local.id,
     });
     const progressed = [{ ...secondDraw, revealed: [true, false] }];
     const retry = await mergeJournalReadings([alternate], progressed);
@@ -171,6 +190,32 @@ describe('portable journal backups', () => {
       readings: [{ ...alternate, revealed: [true, true] }],
     });
   });
+
+  it.each([false, true])(
+    'restores a merged backup onto either original, legacy file: %s',
+    async (legacy) => {
+      const a = { ...reading('shared-legacy-id'), question: 'Reading A' };
+      const b = { ...a, question: 'Reading B' };
+      const merged = await mergeJournalReadings([a], [b]);
+      const json = await createJournalBackup(() => ({
+        readings: merged.readings,
+        nextCursor: null,
+      }));
+      const backup = parseJournalBackup(json);
+      if (legacy) backup.forEach((row) => delete row.sourceId);
+      for (const original of [a, b]) {
+        for (const rows of [backup, [...backup].reverse()]) {
+          const prior = { ...original, revealed: [true, false] };
+          const result = await mergeJournalReadings([prior], rows);
+          expect(result.readings.map((r) => r.question).sort()).toEqual(['Reading A', 'Reading B']);
+          expect(result.readings.find((r) => r.id === prior.id)?.revealed).toEqual([true, true]);
+          expect((await mergeJournalReadings(result.readings, rows)).readings).toBe(
+            result.readings,
+          );
+        }
+      }
+    },
+  );
 
   it('keeps both readings if a backup already contains the first alternate ID', async () => {
     const local = reading('primary');
@@ -201,6 +246,42 @@ describe('portable journal backups', () => {
     );
   });
 
+  it('uses a recorded origin on an opaque historical alternate and admits an independent reading with identical content', async () => {
+    const source = reading('legacy-id');
+    const assigned = { ...source, id: await collisionReadingId(source, 73), sourceId: source.id };
+    const progress = { ...source, revealed: [true, true] };
+    const updated = await mergeJournalReadings([assigned], [progress]);
+    expect(updated.readings).toEqual([{ ...assigned, revealed: [true, true] }]);
+    const other = { ...source, id: 'independent-origin' };
+    const merged = await mergeJournalReadings([assigned], [other]);
+    expect(merged.readings).toEqual([assigned, other]);
+    expect((await mergeJournalReadings(merged.readings, [other])).skipped).toBe(1);
+  });
+
+  it.each(['unrecorded time zone', 'unrecorded collision attempt'])(
+    'requests review of an old merged backup when the original hash used an %s',
+    async (reason) => {
+      const original = reading('legacy-id', '2026-01-02T03:04:05');
+      const other = { ...original, question: 'Other spread at the same ID' };
+      const hashed =
+        reason === 'unrecorded time zone'
+          ? await collisionReadingId({ ...original, createdAt: '2026-01-02T03:04:05-08:00' })
+          : await collisionReadingId(original, 73);
+      const alternate = { ...original, id: hashed };
+      for (const rows of [
+        [other, alternate],
+        [alternate, other],
+      ]) {
+        const incoming = parseJournalBackup(JSON.stringify({ version: 1, readings: rows }));
+        await expect(mergeJournalReadings([original], incoming)).rejects.toThrow(
+          /original ID could not be verified/,
+        );
+      }
+      // A file containing the lone opaque ID provides no conflicting primary.
+      expect((await mergeJournalReadings([original], [alternate])).added).toBe(1);
+    },
+  );
+
   it.each([false, true])(
     'round trips two explicitly distinct backup rows, alternate first: %s',
     async (alternateFirst) => {
@@ -222,5 +303,20 @@ describe('portable journal backups', () => {
   it('flags large files for confirmation before reading them', () => {
     expect(backupNeedsSizeConfirmation(64 * 1024 * 1024)).toBe(false);
     expect(backupNeedsSizeConfirmation(64 * 1024 * 1024 + 1)).toBe(true);
+  });
+
+  it('preserves an explicitly listed primary and alternate even after identical content is recreated at the primary ID', async () => {
+    const primary = reading('legacy');
+    const alternate = { ...primary, id: await collisionReadingId(primary), sourceId: primary.id };
+    for (const rows of [
+      [primary, alternate],
+      [alternate, primary],
+    ]) {
+      const restored = await mergeJournalReadings([], rows);
+      expect(restored.readings).toEqual(rows);
+      expect((await mergeJournalReadings(restored.readings, rows)).readings).toBe(
+        restored.readings,
+      );
+    }
   });
 });
