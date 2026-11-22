@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import { CARD_BY_ID } from '../data/deck';
 import type { Reading } from '../domain/types';
 import { Icon } from './Icons';
@@ -10,6 +10,7 @@ interface Props {
   onRequestDelete: (reading: Reading) => void;
   onRequestClear: () => void;
   account: boolean;
+  opening?: boolean;
   loading?: boolean;
   hasMore?: boolean;
   onLoadMore: () => void;
@@ -22,6 +23,7 @@ export const JournalPage = ({
   onRequestDelete,
   onRequestClear,
   account,
+  opening,
   loading,
   hasMore,
   onLoadMore,
@@ -30,10 +32,10 @@ export const JournalPage = ({
   <section className="journal">
     <div className="result-heading">
       <div>
-        <p className="eyebrow">{account ? 'ACCOUNT JOURNAL' : 'ON THIS DEVICE'}</p>
+        {!opening && <p className="eyebrow">{account ? 'ACCOUNT JOURNAL' : 'ON THIS DEVICE'}</p>}
         <h1>Your reading journal.</h1>
       </div>
-      {(!account || readings.length > 0) && (
+      {!opening && (!account || readings.length > 0) && (
         <button className="button button-secondary" onClick={onRequestClear}>
           <Icon name="trash" />
           Clear History
@@ -41,14 +43,14 @@ export const JournalPage = ({
       )}
     </div>
     {children}
-    {loading ? (
+    {opening || loading ? (
       <p role="status">Loading readings…</p>
     ) : readings.length === 0 ? (
       <div className="empty-journal">
         <Icon name="book" size={46} />
         <h2>A fresh page awaits.</h2>
         <p>Your readings will find a home here.</p>
-        <Link className="button button-gold" to="/">
+        <Link className="button button-gold" prefetch={false} href="/">
           Go to Reading
         </Link>
       </div>
@@ -108,10 +110,12 @@ export const JournalPage = ({
         Load older readings
       </button>
     )}
-    <p className="reflection-note">
-      {account
-        ? 'Your account journal syncs across your signed-in devices.'
-        : 'Stored only in this browser or installed app. Clearing its data can erase your journal.'}
-    </p>
+    {!opening && (
+      <p className="reflection-note">
+        {account
+          ? 'Your account journal syncs across your signed-in devices.'
+          : 'Stored only in this browser or installed app. Clearing its data can erase your journal.'}
+      </p>
+    )}
   </section>
 );

@@ -1,5 +1,17 @@
 # Verification record
 
+## Next.js App Router migration, November 22, 2026
+
+The production build renders all six application routes on demand. With JavaScript disabled, direct requests show the reading form, all 78 deck entries, the journal heading and each account form. Browser authentication and journal restoration run after hydration.
+
+- TypeScript, 214 Vitest tests and nine generated service worker tests passed.
+- All 90 Playwright checks passed across desktop Chromium, mobile Chromium and mobile WebKit. The separate deployment-update test also passed.
+- The production worker verifies 131 offline assets. A browser kept its unsaved draft while navigating offline and restored saved readings across a deployment update.
+- All 44 Firebase SDK integration scenarios and 37 account UI workflows passed against the local Auth and Firestore emulators.
+- The packaged Node.js release served the deck over HTTP and supplied every asset with its expected digest.
+
+## Earlier Vite build, November 19, 2026
+
 Verified on November 19, 2026, on Windows. This is a local production build; no Cloudflare deployment or physical iPhone test was performed.
 
 ## Passed automated checks

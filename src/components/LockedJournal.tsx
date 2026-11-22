@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { resetLockedJournalPassword, signOutAccount, unlockJournal } from '../cloud/journal';
 import { accountError } from './accountError';
-import './AccountForm.css';
 
 export const IncompleteSignOut = ({ uid }: { uid: string }) => {
   const [busy, setBusy] = useState(false);

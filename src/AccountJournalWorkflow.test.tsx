@@ -1,8 +1,8 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { TestApp, TestRouter } from './test/TestRouter';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import App from './App';
 import * as journal from './cloud/journal';
 import * as journalActivity from './cloud/journalActivity';
 import { freshData, STORAGE_KEY } from './domain/storage';
@@ -61,9 +61,9 @@ const nextReading = reading('account-two', 'A question for my second account');
 const synced = { fromCache: false, pending: false, hasMore: false };
 const mount = (path = '/journal') =>
   render(
-    <MemoryRouter initialEntries={[path]}>
-      <App />
-    </MemoryRouter>,
+    <TestRouter path={path}>
+      <TestApp />
+    </TestRouter>,
   );
 const goToJournal = (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole('link', { name: /^Journal/ }));
@@ -131,6 +131,55 @@ beforeEach(() => {
     setAccount(email === firstUser.email ? firstUser : nextUser),
   );
   cloud.signOutAccount.mockImplementation(async () => setAccount(null));
+});
+
+describe('the public view before account restoration', () => {
+  it.each(['/', '/login', '/signup', '/reset-password'])(
+    'keeps form inputs disabled in the initial HTML for %s',
+    (path) => {
+      const readStorage = vi.spyOn(Storage.prototype, 'getItem');
+      const container = document.createElement('div');
+      container.innerHTML = renderToString(
+        <TestRouter path={path}>
+          <TestApp />
+        </TestRouter>,
+      );
+      const form = container.querySelector('form')!;
+      expect(form.querySelector('button[type="submit"]')).toBeDisabled();
+      for (const field of form.querySelectorAll('input, textarea, select')) {
+        expect(field).toBeDisabled();
+      }
+      expect(readStorage).not.toHaveBeenCalled();
+      expect(cloud.observeAccount).not.toHaveBeenCalled();
+    },
+  );
+
+  it('hydrates the shared journal HTML without revealing or reading a guest journal before identity is known', async () => {
+    cloud.observeAccount.mockImplementation((listener) => {
+      accountListener = listener;
+      return () => {};
+    });
+    const page = (
+      <TestRouter path="/journal">
+        <TestApp />
+      </TestRouter>
+    );
+    const readStorage = vi.spyOn(Storage.prototype, 'getItem');
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(page);
+    document.body.appendChild(container);
+    const onRecoverableError = vi.fn();
+    render(page, { container, hydrate: true, onRecoverableError });
+    expect(screen.getByRole('heading', { name: 'Your reading journal.' })).toBeVisible();
+    expect(screen.queryByText(deviceReading.question)).toBeNull();
+    expect(readStorage).not.toHaveBeenCalled();
+    expect(cloud.observeReadings).not.toHaveBeenCalled();
+    expect(onRecoverableError).not.toHaveBeenCalled();
+
+    act(() => setAccount(firstUser));
+    expect(await screen.findByRole('heading', { name: firstReading.question })).toBeVisible();
+    expect(screen.queryByText(deviceReading.question)).toBeNull();
+  });
 });
 
 describe('account journal workflows', () => {

@@ -1,23 +1,22 @@
+'use client';
+
 import {
+  createContext,
+  useContext,
   useCallback,
   useEffect,
   useRef,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
   type RefObject,
+  type ReactNode,
 } from 'react';
-import {
-  Link,
-  Navigate,
-  NavLink,
-  Outlet,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-} from 'react-router-dom';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import { DECK, CARD_BY_ID } from './data/deck';
 import { drawCards } from './domain/random';
+import { readingDateLabel } from './domain/readingDate';
 import { waitForGuestWrites, withGuestWrite } from './domain/guestWrite';
 import { recoverGuestReadings } from './domain/guestRecovery';
 import {
@@ -42,7 +41,6 @@ import {
   isJournalLocked,
   isJournalLockedInThisTabOnly,
   observeJournalLock,
-  lockJournal,
   exportAccountJournal,
   reviewAccountClear,
   checkReadingsForPendingDeletions,
@@ -54,26 +52,16 @@ import {
 } from './cloud/journal';
 import { useAccountJournal } from './useAccountJournal';
 import { checkSiblingRecovery } from './cloud/journalActivity';
-import { AccountForm } from './components/AccountForm';
-import { AccountPanel } from './components/AccountPanel';
 import { IncompleteSignOut, LockedJournal } from './components/LockedJournal';
-import { JournalTransfer, type JournalExport } from './components/JournalTransfer';
+import type { JournalExport } from './components/JournalTransfer';
 import type { Reading, Settings } from './domain/types';
 import type { RecoveryCopy } from './domain/readingRecovery';
-import { CardArtwork, CardBackArtwork } from './components/CardArtwork';
-import { CardLibrary } from './components/CardLibrary';
-import { JournalPage } from './components/JournalPage';
+import { CardArtwork } from './components/CardArtwork';
 import { Icon } from './components/Icons';
 import { Modal } from './components/Modal';
 import { subscribeOfflineStatus } from './pwa';
 
 const CARD_IDS = Object.freeze(DECK.map((card) => card.id));
-const DRAW_OPTIONS = [
-  { key: 'reversals', label: 'Include reversals', hint: 'Allow upright and reversed cards' },
-  { key: 'instantReveal', label: 'Reveal cards instantly', hint: 'Draw your spread face up' },
-] as const;
-const dateLabel = (date: string) =>
-  new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
 type GuestChange = (current: AppData) => AppData;
 interface GuestDraft {
@@ -87,25 +75,34 @@ const guestWriteUnavailable =
 const guestDraftConflicts = (draft: GuestDraft | null, stored: ReturnType<typeof loadData>) =>
   draft && !stored.warning && JSON.stringify(draft.base) !== JSON.stringify(stored.data);
 
-export default function App() {
+const NavLink = ({ href, className = '', ...props }: ComponentProps<typeof Link>) => {
+  const current = usePathname() === href;
+  return (
+    <Link
+      {...props}
+      prefetch={false}
+      href={href}
+      aria-current={current ? 'page' : undefined}
+      className={current ? `${className} active`.trim() : className}
+    />
+  );
+};
+
+export default function App({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<JournalUser | null | undefined>(undefined);
   const guestDraft = useRef<GuestDraft | null>(null);
   useEffect(() => observeAccount(setUser), []);
-  if (user === undefined)
-    return (
-      <main>
-        <p role="status">Opening Arcana Journal…</p>
-      </main>
-    );
   if (user?.signOutIncomplete) return <IncompleteSignOut uid={user.uid} />;
   const journalUid = user?.emailVerified ? user.uid : undefined;
   return (
     <JournalSession
-      key={journalUid ? `account:${journalUid}` : 'guest'}
+      key={user === undefined ? 'opening' : journalUid ? `account:${journalUid}` : 'guest'}
       user={user}
       journalUid={journalUid}
       guestDraft={guestDraft}
-    />
+    >
+      {children}
+    </JournalSession>
   );
 }
 
@@ -125,34 +122,41 @@ const loadAccountView = (uid: string) => {
   return { data, warning: '' };
 };
 
-function JournalSession({
-  user,
-  journalUid,
-  guestDraft,
-}: {
-  user: JournalUser | null;
+interface SessionProps {
+  user: JournalUser | null | undefined;
   journalUid: string | undefined;
   guestDraft: RefObject<GuestDraft | null>;
-}) {
+}
+
+function useJournalController({ user, journalUid, guestDraft }: SessionProps) {
+  const opening = user === undefined;
   const uid = user?.uid;
   const subscribeToLock = useCallback(
     (notify: () => void) => (uid ? observeJournalLock(uid, notify) : () => {}),
     [uid],
   );
-  const lockScope = useSyncExternalStore(subscribeToLock, () => {
-    if (!uid || !isJournalLocked(uid)) return 'open';
-    return isJournalLockedInThisTabOnly(uid) ? 'tab' : 'browser';
-  });
+  const lockScope = useSyncExternalStore(
+    subscribeToLock,
+    () => {
+      if (!uid || !isJournalLocked(uid)) return 'open';
+      return isJournalLockedInThisTabOnly(uid) ? 'tab' : 'browser';
+    },
+    () => 'open',
+  );
   const locked = lockScope !== 'open';
+  // The server and the first client render use the same public view. Only the
+  // resolved browser session may read device storage or subscribe to private data.
   const [initial] = useState(() =>
-    journalUid
-      ? loadAccountView(journalUid)
-      : guestDraft.current
-        ? {
-            data: guestDraft.current.data,
-            warning: 'Your unsaved guest readings are available in this session.',
-          }
-        : loadData(),
+    opening
+      ? { data: freshData(), warning: '' }
+      : journalUid
+        ? loadAccountView(journalUid)
+        : guestDraft.current
+          ? {
+              data: guestDraft.current.data,
+              warning: 'Your unsaved guest readings are available in this session.',
+            }
+          : loadData(),
   );
   const [data, setData] = useState(initial.data);
   const dataRef = useRef(data);
@@ -184,8 +188,13 @@ function JournalSession({
   const [guestClearStatus, setGuestClearStatus] = useState('');
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [authEmail, setAuthEmail] = useState('');
+  useEffect(() => {
+    if (pathname !== '/login' && pathname !== '/signup' && pathname !== '/reset-password')
+      setAuthEmail('');
+  }, [pathname]);
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Reading | 'all' | null>(null);
@@ -221,7 +230,7 @@ function JournalSession({
   const revealedCount = reading?.revealed.filter(Boolean).length ?? 0;
 
   useEffect(() => {
-    if (journalUid) return;
+    if (opening || journalUid) return;
     let active = true;
     const refreshGuest = async () => {
       // A pending local draw/reveal may still be waiting for the guest write lock.
@@ -277,7 +286,7 @@ function JournalSession({
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('pageshow', refreshGuest);
     };
-  }, [journalUid, guestDraft]);
+  }, [opening, journalUid, guestDraft]);
 
   useEffect(() => {
     setDetails(null);
@@ -320,25 +329,14 @@ function JournalSession({
 
   useEffect(
     () =>
-      subscribeOfflineStatus((status, update) => {
-        setOffline(status);
-        setUpdateAvailable(update);
-      }),
-    [],
+      !opening
+        ? subscribeOfflineStatus((status, update) => {
+            setOffline(status);
+            setUpdateAvailable(update);
+          })
+        : undefined,
+    [opening],
   );
-
-  if (user && locked) {
-    return (
-      <LockedJournal
-        key={user.uid}
-        uid={user.uid}
-        hasFailedWrites={account.hasFailedWrites}
-        saving={account.saving}
-        needsOpenTab={account.needsOpenTab}
-        tabOnly={lockScope === 'tab'}
-      />
-    );
-  }
 
   const showData = (next: AppData) => {
     dataRef.current = next;
@@ -531,7 +529,12 @@ function JournalSession({
   };
   const draw = (event: React.FormEvent) => {
     event.preventDefault();
-    if (drawLocked.current || dataRef.current.activeId || dataRef.current.awaitingNewReading)
+    if (
+      opening ||
+      drawLocked.current ||
+      dataRef.current.activeId ||
+      dataRef.current.awaitingNewReading
+    )
       return;
     drawLocked.current = true; // Synchronous guard also blocks taps before React commits.
     setError('');
@@ -610,7 +613,7 @@ function JournalSession({
     setDetails(null);
     setCopied(false);
     setError('');
-    navigate('/');
+    router.push('/');
   };
   const deleteReadings = async () => {
     if (!confirmDelete || (uid && isJournalLocked(uid))) {
@@ -738,557 +741,348 @@ function JournalSession({
   const selected = reading && details !== null ? reading.cards[details] : null;
   const selectedCard = selected ? CARD_BY_ID.get(selected.cardId)! : null;
 
+  const requestClear = () => {
+    if (!journalUid) guestClearTargets.current = dataRef.current.readings;
+    setConfirmDelete('all');
+  };
+  return {
+    user,
+    journalUid,
+    opening,
+    account,
+    readings,
+    reading,
+    data,
+    count,
+    question,
+    setQuestion,
+    updateSettings,
+    draw,
+    newReading,
+    revealedCount,
+    reveal,
+    setDetails,
+    copyReading,
+    copied,
+    error,
+    guestClearStatus,
+    openReading,
+    setConfirmDelete,
+    requestClear,
+    historyRevision,
+    deviceCount,
+    guestReadingsForTransfer,
+    exportJournal,
+    previewImport,
+    importJournal,
+    authEmail,
+    setAuthEmail,
+    lockScope,
+    locked,
+    handleReadingLinkClick,
+    setHelp,
+    warning,
+    offline,
+    updateAvailable,
+    help,
+    selected,
+    selectedCard,
+    details,
+    confirmDelete,
+    clearReview,
+    clearReviewError,
+    deleteReadings,
+    copyText,
+    setCopyText,
+  };
+}
+
+const JournalContext = createContext<ReturnType<typeof useJournalController> | null>(null);
+export const useJournalSession = () => {
+  const session = useContext(JournalContext);
+  if (!session) throw new Error('Missing journal session.');
+  return session;
+};
+
+function JournalSession({ children, ...props }: SessionProps & { children: ReactNode }) {
+  const session = useJournalController(props);
+  const {
+    user,
+    journalUid,
+    lockScope,
+    locked,
+    account,
+    readings,
+    handleReadingLinkClick,
+    setHelp,
+    opening,
+    warning,
+    offline,
+    updateAvailable,
+    help,
+    selected,
+    selectedCard,
+    details,
+    setDetails,
+    confirmDelete,
+    setConfirmDelete,
+    clearReview,
+    clearReviewError,
+    deleteReadings,
+    copyText,
+    setCopyText,
+  } = session;
+  if (user && locked) {
+    return (
+      <LockedJournal
+        key={user.uid}
+        uid={user.uid}
+        hasFailedWrites={account.hasFailedWrites}
+        saving={account.saving}
+        needsOpenTab={account.needsOpenTab}
+        tabOnly={lockScope === 'tab'}
+      />
+    );
+  }
+
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <div className="header-identity">
-          <Link
-            className="wordmark"
-            to="/"
-            aria-label="Arcana Journal, reading"
-            onClick={handleReadingLinkClick}
-          >
-            <span className="brand-symbol">
-              <Icon name="spark" size={27} />
-            </span>
-            <span>
-              Arcana Journal<span className="wordmark-caption">A LITTLE SPACE FOR REFLECTION</span>
-            </span>
-          </Link>
-          {!user && (
-            <div className="header-account-links">
-              <NavLink to="/login">Sign in</NavLink>
-              <NavLink className="header-signup" to="/signup">
-                Create account
-              </NavLink>
-            </div>
-          )}
-        </div>
-        <nav aria-label="Main navigation">
-          <NavLink className="nav-button" to="/" end onClick={handleReadingLinkClick}>
-            <Icon name="cards" />
-            <span>Reading</span>
-          </NavLink>
-          <NavLink className="nav-button" to="/deck">
-            <Icon name="library" />
-            <span>Deck</span>
-          </NavLink>
-          <NavLink className="nav-button" to="/journal">
-            <Icon name="book" />
-            <span>Journal</span>
-            {readings.length > 0 && (
-              <span className="nav-count">
-                {readings.length}
-                {journalUid && account.hasMore ? '+' : ''}
-              </span>
-            )}
-          </NavLink>
-          <button
-            className="icon-button help-button"
-            aria-label="About, installation, and randomness"
-            onClick={() => setHelp(true)}
-          >
-            <Icon name="info" />
-          </button>
-        </nav>
-      </header>
-
-      <main id="main">
-        {journalUid && account.deleteError && (
-          <p className="notice warning" role="alert">
-            {account.deleteError}
-          </p>
-        )}
-        {journalUid && account.syncError && (
-          <div className="notice warning" role="alert">
-            {account.syncError}{' '}
-            <button type="button" className="button button-secondary" onClick={account.retrySync}>
-              Retry sync
-            </button>
-          </div>
-        )}
-        {warning && (
-          <p className="notice warning" role="alert">
-            {warning}
-          </p>
-        )}
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <>
-                {account.loadingActive && (
-                  <div className="empty-journal">
-                    <p role="status">Looking for your saved reading…</p>
-                    <button className="button button-secondary" onClick={newReading}>
-                      Start a new reading
-                    </button>
-                  </div>
-                )}
-                {!account.loadingActive && !reading && data.awaitingNewReading && (
-                  <section className="empty-journal">
-                    <Icon name="moon" size={46} />
-                    <h1>A little space to begin again.</h1>
-                    <p>
-                      {journalUid
-                        ? 'This reading is unavailable on this device.'
-                        : 'Your previous reading has been removed.'}
-                    </p>
-                    <button className="button button-gold" onClick={newReading}>
-                      <Icon name="spark" />
-                      New Reading
-                    </button>
-                  </section>
-                )}
-                {!reading && !data.awaitingNewReading && (
-                  <>
-                    <section className="intro">
-                      <p className="eyebrow">
-                        <span /> YOUR MOMENT OF STILLNESS <span />
-                      </p>
-                      <h1>
-                        A question. A card.
-                        <br />
-                        <em>A new perspective.</em>
-                      </h1>
-                      <p>
-                        Let the cards be a starting point.
-                        <br className="mobile-break" /> The meaning you find is yours.
-                      </p>
-                    </section>
-                    <section className="reading-workspace" aria-label="Prepare your reading">
-                      <div className="deck-preview" aria-hidden="true">
-                        <div className="orbital orbital-one" />
-                        <div className="orbital orbital-two" />
-                        <span className="sky-star star-one">✦</span>
-                        <span className="sky-star star-two">✧</span>
-                        <span className="sky-star star-three">✦</span>
-                        <div className="preview-card preview-left">
-                          <CardBackArtwork />
-                        </div>
-                        <div className="preview-card preview-right">
-                          <CardBackArtwork />
-                        </div>
-                        <div className="preview-card preview-center">
-                          <CardBackArtwork />
-                        </div>
-                        <p className="deck-caption">78 CARDS · ENDLESS PERSPECTIVES</p>
-                      </div>
-                      <form className="reading-form" onSubmit={draw}>
-                        <div className="form-heading">
-                          <span className="mini-star">✧</span>
-                          <h2>Make room for a reading</h2>
-                        </div>
-                        <fieldset>
-                          <legend>Choose your spread</legend>
-                          <div className="mode-options">
-                            {(
-                              [
-                                ['one', 'One card', 'A single focus'],
-                                ['three', 'Three cards', 'Room to explore'],
-                                ['custom', 'Custom', 'Your own spread'],
-                              ] as const
-                            ).map(([mode, label, description]) => (
-                              <button
-                                type="button"
-                                key={mode}
-                                aria-pressed={data.settings.mode === mode}
-                                className={
-                                  data.settings.mode === mode
-                                    ? 'mode-option selected'
-                                    : 'mode-option'
-                                }
-                                onClick={() => updateSettings({ mode })}
-                              >
-                                <span className="mode-glyph" aria-hidden="true">
-                                  {mode === 'one' ? '▯' : mode === 'three' ? '▯▯▯' : '✧'}
-                                </span>
-                                <strong>{label}</strong>
-                                <small>{description}</small>
-                              </button>
-                            ))}
-                          </div>
-                        </fieldset>
-                        {data.settings.mode === 'custom' && (
-                          <label className="custom-count">
-                            Number of cards{' '}
-                            <select
-                              value={data.settings.customCount}
-                              onChange={(event) =>
-                                updateSettings({ customCount: Number(event.target.value) })
-                              }
-                            >
-                              {Array.from({ length: 10 }, (_, i) => (
-                                <option key={i + 1} value={i + 1}>
-                                  {i + 1}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
-                        <label className="question-label" htmlFor="question">
-                          What’s on your mind? <span>optional</span>
-                        </label>
-                        <textarea
-                          id="question"
-                          value={question}
-                          maxLength={2000}
-                          onChange={(event) => setQuestion(event.target.value)}
-                          placeholder="A question, an intention, or simply an open mind…"
-                          rows={3}
-                        />
-                        <p className="field-hint">
-                          A note for your journal. It never influences the draw.
-                        </p>
-                        {DRAW_OPTIONS.map(({ key, label, hint }) => (
-                          <label key={key} className="reading-setting">
-                            <span>
-                              <strong>{label}</strong>
-                              <small>{hint}</small>
-                            </span>
-                            <input
-                              type="checkbox"
-                              checked={data.settings[key]}
-                              onChange={(event) => updateSettings({ [key]: event.target.checked })}
-                            />
-                            <span className="switch" aria-hidden="true" />
-                          </label>
-                        ))}
-                        {error && (
-                          <p className="notice warning" role="alert">
-                            {error}
-                          </p>
-                        )}
-                        <button type="submit" className="button button-gold draw-button">
-                          <Icon name="spark" /> Draw Cards{' '}
-                          <span className="button-count">{count}</span>
-                        </button>
-                        <p className="draw-note">
-                          Every card has an equal chance. Every reading starts fresh.
-                        </p>
-                      </form>
-                    </section>
-                    <div className="principles">
-                      <span>
-                        <Icon name="moon" size={17} /> Your own quiet ritual
-                      </span>
-                      <span>
-                        <Icon name="check" size={17} /> Secure, unbiased draws
-                      </span>
-                      <span>
-                        <Icon name="book" size={17} />{' '}
-                        {journalUid ? 'Your synced reading journal' : 'A journal on your device'}
-                      </span>
-                    </div>
-                  </>
-                )}
-
-                {reading && (
-                  <section className="reading-result" aria-label="Your reading">
-                    <div className="result-heading">
-                      <div>
-                        <p className="eyebrow">
-                          {dateLabel(reading.createdAt)} · {reading.cards.length}{' '}
-                          {reading.cards.length === 1 ? 'CARD' : 'CARDS'}
-                        </p>
-                        <h1>Your moment, drawn.</h1>
-                        <p className="reading-question">
-                          {reading.question || 'An open reading. A little space to listen.'}
-                        </p>
-                      </div>
-                      <button className="button button-secondary" onClick={newReading}>
-                        <Icon name="spark" />
-                        New Reading
-                      </button>
-                    </div>
-                    <div className="reveal-bar">
-                      <p role="status" aria-live="polite">
-                        {revealedCount === reading.cards.length
-                          ? 'Your spread is revealed. Tap a card to explore its meaning.'
-                          : `${revealedCount} of ${reading.cards.length} revealed · Tap a card when you’re ready.`}
-                      </p>
-                      <button
-                        className="text-button"
-                        onClick={() => reveal()}
-                        disabled={revealedCount === reading.cards.length}
-                      >
-                        Reveal All
-                      </button>
-                    </div>
-                    <div
-                      className={`spread-grid ${reading.cards.length === 1 ? 'single-card' : ''}`}
-                    >
-                      {reading.cards.map((drawn, index) => {
-                        const card = CARD_BY_ID.get(drawn.cardId)!;
-                        const isRevealed = reading.revealed[index];
-                        return (
-                          <div className="spread-slot" key={`${reading.id}-${index}`}>
-                            <p className="position-label">
-                              CARD {String(index + 1).padStart(2, '0')}
-                            </p>
-                            <button
-                              className={`tarot-card ${isRevealed ? 'is-revealed' : ''}`}
-                              aria-label={
-                                isRevealed
-                                  ? `${card.name}, ${drawn.orientation}. View card details`
-                                  : `Reveal card ${index + 1}`
-                              }
-                              onClick={(event) => {
-                                if (event.detail > 1) return;
-                                isRevealed ? setDetails(index) : reveal(index);
-                              }}
-                            >
-                              <span className="card-flipper">
-                                <span className="card-face card-back" aria-hidden="true">
-                                  <CardBackArtwork />
-                                </span>
-                                <span className="card-face card-front" aria-hidden="true">
-                                  <CardArtwork
-                                    card={card}
-                                    reversed={drawn.orientation === 'reversed'}
-                                  />
-                                </span>
-                              </span>
-                              <span className="card-caption" aria-hidden="true">
-                                <strong>{isRevealed ? card.name : 'Your card awaits'}</strong>
-                                <small>{isRevealed ? drawn.orientation : 'Tap to reveal'}</small>
-                              </span>
-                            </button>
-                            <p className="card-underlabel">
-                              {isRevealed
-                                ? card[drawn.orientation].keywords.slice(0, 2).join(' · ')
-                                : 'Tap to reveal'}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="reading-actions">
-                      <button className="button button-secondary" onClick={copyReading}>
-                        <Icon name={copied ? 'check' : 'copy'} />
-                        {copied ? 'Copied Reading' : 'Copy Reading'}
-                      </button>
-                      <span role="status">
-                        {copied
-                          ? 'Ready to paste into your chat or notes.'
-                          : 'Your cards stay exactly as drawn.'}
-                      </span>
-                    </div>
-                    <p className="reflection-note">
-                      {journalUid
-                        ? account.status
-                        : 'A prompt for reflection. You decide what resonates.'}
-                    </p>
-                  </section>
-                )}
-              </>
-            }
-          />
-          <Route path="/deck" element={<CardLibrary />} />
-          <Route element={user ? <Navigate to="/journal" replace /> : <Outlet />}>
-            <Route path="/login" element={<AccountForm mode="signIn" />} />
-            <Route path="/signup" element={<AccountForm mode="signUp" />} />
-            <Route path="/reset-password" element={<AccountForm mode="reset" />} />
-          </Route>
-          <Route
-            path="/journal"
-            element={
-              <JournalPage
-                readings={readings}
-                account={Boolean(journalUid)}
-                loading={account.loading}
-                hasMore={Boolean(journalUid && account.hasMore)}
-                onLoadMore={account.loadMore}
-                onOpen={openReading}
-                onRequestDelete={setConfirmDelete}
-                onRequestClear={() => {
-                  if (!journalUid) guestClearTargets.current = dataRef.current.readings;
-                  setConfirmDelete('all');
-                }}
-              >
-                {!journalUid && guestClearStatus && <p role="status">{guestClearStatus}</p>}
-                <AccountPanel
-                  key={user?.uid ?? 'signed-out'}
-                  user={user}
-                  syncStatus={account.status}
-                  signOutDisabled={account.pending}
-                  onLock={account.trusted && journalUid ? () => lockJournal(journalUid) : undefined}
-                />
-                <JournalTransfer
-                  historyRevision={historyRevision}
-                  accountEmail={journalUid ? (user?.email ?? null) : null}
-                  recoveryReadings={account.recoveryReadings}
-                  deletionStorageUnreadable={account.deletionStorageUnreadable}
-                  recoveryComplete={account.recoveryComplete}
-                  getRecoveryForExport={account.getRecoveryForExport}
-                  savedRecovery={account.savedRecovery}
-                  deviceCount={deviceCount}
-                  getDeviceReadings={guestReadingsForTransfer}
-                  onExport={exportJournal}
-                  onPreview={previewImport}
-                  onImport={importJournal}
-                />
-              </JournalPage>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-
-      <footer className="site-footer">
-        <span>Made for a moment of reflection.</span>
-        <button className="footer-status" onClick={() => setHelp(true)}>
-          <Icon name={offline === 'ready' ? 'check' : 'info'} size={15} />
-          {offline === 'ready'
-            ? 'Ready for offline use'
-            : offline === 'checking'
-              ? 'Preparing offline use…'
-              : offline === 'error'
-                ? 'Offline setup incomplete'
-                : 'Offline setup unavailable'}
-        </button>
-      </footer>
-      {updateAvailable && (
-        <p className="update-note" role="status">
-          An update is cached. It will be used after all Arcana Journal windows close. Your saved
-          cards will stay the same.
-        </p>
-      )}
-
-      {help && (
-        <Modal title="About Arcana Journal" onClose={() => setHelp(false)}>
-          <div className="help-content">
-            <p>
-              A complete 78-card tarot deck, a private journal, and a quiet space to reflect. Free
-              to use, with no account or connection needed after offline setup.
-            </p>
-            <h3>Fair draws, explained</h3>
-            <p>
-              Each reading uses cryptographically secure random draws with unbiased shuffling. Web
-              Crypto supplies unsigned 32-bit values; rejection sampling removes modulo bias.
-              Fisher–Yates shuffles a fresh full deck once, then takes your chosen number of cards
-              without replacement.
-            </p>
-            <p>
-              Your question, past readings, meanings, and animations never enter the selection
-              algorithm. Separate readings can repeat, even in full. With reversals enabled, each
-              drawn card independently gets a secure 50/50 orientation. Without Web Crypto, drawing
-              stops with an error.
-            </p>
-            <h3>Keep it on your iPhone</h3>
-            <ol>
-              <li>Open the deployed HTTPS address in Safari.</li>
-              <li>Tap Share, then Add to Home Screen.</li>
-              <li>Enable Open as Web App if shown, then tap Add.</li>
-              <li>
-                Open Arcana Journal from that icon while online. Wait for “Ready for offline use”
-                before disconnecting.
-              </li>
-            </ol>
-            <p>
-              Updates wait until all app windows are closed. A cached update never reloads an active
-              reading.
-            </p>
-            <h3>Where your journal is saved</h3>
-            <p>
-              Guest readings stay in this browser or installed app. Sign in and verify your email on
-              the Journal page to sync account readings across devices. To bring over existing
-              readings, choose Import this device’s journal and review the destination. Export
-              journal saves a portable backup. Anyone with the file can read its contents.
-            </p>
-            <h3>The deck</h3>
-            <p>
-              All 78 cards illustrate the traditional Rider–Waite–Smith scenes, with newly created
-              artwork in a textured, colorful style. The original scenes were illustrated by Pamela
-              Colman Smith for Arthur Edward Waite. Artwork and fixed upright and reversed meanings
-              are bundled on your device. No image or AI service is needed to use the app.
-            </p>
-            <p className="help-footnote">
-              Card meanings offer prompts for reflection, not promises about what will happen.
-            </p>
-          </div>
-        </Modal>
-      )}
-      {selected && selectedCard && details !== null && (
-        <Modal
-          title={selectedCard.name}
-          onClose={() => setDetails(null)}
-          className="card-detail-modal"
-        >
-          <div className="card-detail">
-            <div className="detail-art">
-              <CardArtwork card={selectedCard} reversed={selected.orientation === 'reversed'} />
-            </div>
-            <div>
-              <p className="eyebrow">
-                CARD {details + 1} ·{' '}
-                {selectedCard.arcana === 'major'
-                  ? 'MAJOR ARCANA'
-                  : selectedCard.suit?.toUpperCase()}
-              </p>
-              <span className="orientation-badge">{selected.orientation}</span>
-              <div className="keyword-list">
-                {selectedCard[selected.orientation].keywords.map((word) => (
-                  <span key={word}>{word}</span>
-                ))}
-              </div>
-              <p className="card-meaning">{selectedCard[selected.orientation].meaning}</p>
-              <p className="field-hint">Notice what connects with your own experience.</p>
-            </div>
-          </div>
-        </Modal>
-      )}
-      {confirmDelete && (
-        <Modal
-          title={confirmDelete === 'all' ? 'Clear your journal?' : 'Delete this reading?'}
-          onClose={() => setConfirmDelete(null)}
-        >
-          {confirmDelete !== 'all' && (
-            <p>
-              {confirmDelete.question || 'An open reading'} · {dateLabel(confirmDelete.createdAt)}
-            </p>
-          )}
-          <p>
-            {journalUid
-              ? confirmDelete === 'all'
-                ? clearReview
-                  ? `This will remove the ${clearReview.documents.length} synced ${clearReview.documents.length === 1 ? 'reading' : 'readings'} reviewed here and the current unsynced readings in this browser. Account readings added or changed after review will be kept.`
-                  : clearReviewError || 'Checking the readings in your account…'
-                : account.isFailedDraw(confirmDelete.id)
-                  ? 'This unsynced reading will be discarded from this tab.'
-                  : 'This reading will be removed from your account and every synced device.'
-              : confirmDelete === 'all'
-                ? 'This clears the guest readings shown here, any unreadable guest history, and all guest recovery copies in this browser.'
-                : 'This reading will be removed from this device.'}{' '}
-            {(confirmDelete !== 'all' || !journalUid || clearReview) && 'This cannot be undone.'}
-          </p>
-          <div className="modal-actions">
-            <button className="button button-secondary" onClick={() => setConfirmDelete(null)}>
-              Keep {confirmDelete === 'all' ? 'Readings' : 'Reading'}
-            </button>
-            <button
-              className="button button-danger"
-              disabled={Boolean(journalUid && confirmDelete === 'all' && !clearReview)}
-              onClick={deleteReadings}
+    <JournalContext.Provider value={session}>
+      <div className="app-shell">
+        <header className="site-header">
+          <div className="header-identity">
+            <Link
+              className="wordmark"
+              prefetch={false}
+              href="/"
+              aria-label="Arcana Journal, reading"
+              onClick={handleReadingLinkClick}
             >
-              {confirmDelete === 'all' ? 'Clear All Readings' : 'Delete Reading'}
-            </button>
+              <span className="brand-symbol">
+                <Icon name="spark" size={27} />
+              </span>
+              <span>
+                Arcana Journal
+                <span className="wordmark-caption">A LITTLE SPACE FOR REFLECTION</span>
+              </span>
+            </Link>
+            {!user && (
+              <div className="header-account-links">
+                <NavLink href="/login">Sign in</NavLink>
+                <NavLink className="header-signup" href="/signup">
+                  Create account
+                </NavLink>
+              </div>
+            )}
           </div>
-        </Modal>
-      )}
-      {copyText && (
-        <Modal title="Copy your reading" onClose={() => setCopyText(null)}>
-          <p>Your browser couldn’t access the clipboard. Select and copy the text below.</p>
-          <textarea
-            className="copy-fallback"
-            aria-label="Reading text to copy"
-            readOnly
-            value={copyText}
-            onFocus={(event) => event.target.select()}
-            rows={12}
-          />
-        </Modal>
-      )}
-    </div>
+          <nav aria-label="Main navigation">
+            <NavLink className="nav-button" href="/" onClick={handleReadingLinkClick}>
+              <Icon name="cards" />
+              <span>Reading</span>
+            </NavLink>
+            <NavLink className="nav-button" href="/deck">
+              <Icon name="library" />
+              <span>Deck</span>
+            </NavLink>
+            <NavLink className="nav-button" href="/journal">
+              <Icon name="book" />
+              <span>Journal</span>
+              {readings.length > 0 && (
+                <span className="nav-count">
+                  {readings.length}
+                  {journalUid && account.hasMore ? '+' : ''}
+                </span>
+              )}
+            </NavLink>
+            <button
+              className="icon-button help-button"
+              disabled={opening}
+              aria-label="About, installation, and randomness"
+              onClick={() => setHelp(true)}
+            >
+              <Icon name="info" />
+            </button>
+          </nav>
+        </header>
+
+        <main id="main">
+          {journalUid && account.deleteError && (
+            <p className="notice warning" role="alert">
+              {account.deleteError}
+            </p>
+          )}
+          {journalUid && account.syncError && (
+            <div className="notice warning" role="alert">
+              {account.syncError}{' '}
+              <button type="button" className="button button-secondary" onClick={account.retrySync}>
+                Retry sync
+              </button>
+            </div>
+          )}
+          {warning && (
+            <p className="notice warning" role="alert">
+              {warning}
+            </p>
+          )}
+          {children}
+        </main>
+
+        <footer className="site-footer">
+          <span>Made for a moment of reflection.</span>
+          <button className="footer-status" disabled={opening} onClick={() => setHelp(true)}>
+            <Icon name={offline === 'ready' ? 'check' : 'info'} size={15} />
+            {offline === 'ready'
+              ? 'Ready for offline use'
+              : offline === 'checking'
+                ? 'Preparing offline use…'
+                : offline === 'error'
+                  ? 'Offline setup incomplete'
+                  : 'Offline setup unavailable'}
+          </button>
+        </footer>
+        {updateAvailable && (
+          <p className="update-note" role="status">
+            An update is cached. It will be used after all Arcana Journal windows close. Your saved
+            cards will stay the same.
+          </p>
+        )}
+
+        {help && (
+          <Modal title="About Arcana Journal" onClose={() => setHelp(false)}>
+            <div className="help-content">
+              <p>
+                A complete 78-card tarot deck, a private journal, and a quiet space to reflect. Free
+                to use, with no account or connection needed after offline setup.
+              </p>
+              <h3>Fair draws, explained</h3>
+              <p>
+                Each reading uses cryptographically secure random draws with unbiased shuffling. Web
+                Crypto supplies unsigned 32-bit values; rejection sampling removes modulo bias.
+                Fisher–Yates shuffles a fresh full deck once, then takes your chosen number of cards
+                without replacement.
+              </p>
+              <p>
+                Your question, past readings, meanings, and animations never enter the selection
+                algorithm. Separate readings can repeat, even in full. With reversals enabled, each
+                drawn card independently gets a secure 50/50 orientation. Without Web Crypto,
+                drawing stops with an error.
+              </p>
+              <h3>Keep it on your iPhone</h3>
+              <ol>
+                <li>Open the deployed HTTPS address in Safari.</li>
+                <li>Tap Share, then Add to Home Screen.</li>
+                <li>Enable Open as Web App if shown, then tap Add.</li>
+                <li>
+                  Open Arcana Journal from that icon while online. Wait for “Ready for offline use”
+                  before disconnecting.
+                </li>
+              </ol>
+              <p>
+                Updates wait until all app windows are closed. A cached update never reloads an
+                active reading.
+              </p>
+              <h3>Where your journal is saved</h3>
+              <p>
+                Guest readings stay in this browser or installed app. Sign in and verify your email
+                on the Journal page to sync account readings across devices. To bring over existing
+                readings, choose Import this device’s journal and review the destination. Export
+                journal saves a portable backup. Anyone with the file can read its contents.
+              </p>
+              <h3>The deck</h3>
+              <p>
+                All 78 cards illustrate the traditional Rider–Waite–Smith scenes, with newly created
+                artwork in a textured, colorful style. The original scenes were illustrated by
+                Pamela Colman Smith for Arthur Edward Waite. Artwork and fixed upright and reversed
+                meanings are bundled on your device. No image or AI service is needed to use the
+                app.
+              </p>
+              <p className="help-footnote">
+                Card meanings offer prompts for reflection, not promises about what will happen.
+              </p>
+            </div>
+          </Modal>
+        )}
+        {selected && selectedCard && details !== null && (
+          <Modal
+            title={selectedCard.name}
+            onClose={() => setDetails(null)}
+            className="card-detail-modal"
+          >
+            <div className="card-detail">
+              <div className="detail-art">
+                <CardArtwork card={selectedCard} reversed={selected.orientation === 'reversed'} />
+              </div>
+              <div>
+                <p className="eyebrow">
+                  CARD {details + 1} ·{' '}
+                  {selectedCard.arcana === 'major'
+                    ? 'MAJOR ARCANA'
+                    : selectedCard.suit?.toUpperCase()}
+                </p>
+                <span className="orientation-badge">{selected.orientation}</span>
+                <div className="keyword-list">
+                  {selectedCard[selected.orientation].keywords.map((word) => (
+                    <span key={word}>{word}</span>
+                  ))}
+                </div>
+                <p className="card-meaning">{selectedCard[selected.orientation].meaning}</p>
+                <p className="field-hint">Notice what connects with your own experience.</p>
+              </div>
+            </div>
+          </Modal>
+        )}
+        {confirmDelete && (
+          <Modal
+            title={confirmDelete === 'all' ? 'Clear your journal?' : 'Delete this reading?'}
+            onClose={() => setConfirmDelete(null)}
+          >
+            {confirmDelete !== 'all' && (
+              <p>
+                {confirmDelete.question || 'An open reading'} ·{' '}
+                {readingDateLabel(confirmDelete.createdAt)}
+              </p>
+            )}
+            <p>
+              {journalUid
+                ? confirmDelete === 'all'
+                  ? clearReview
+                    ? `This will remove the ${clearReview.documents.length} synced ${clearReview.documents.length === 1 ? 'reading' : 'readings'} reviewed here and the current unsynced readings in this browser. Account readings added or changed after review will be kept.`
+                    : clearReviewError || 'Checking the readings in your account…'
+                  : account.isFailedDraw(confirmDelete.id)
+                    ? 'This unsynced reading will be discarded from this tab.'
+                    : 'This reading will be removed from your account and every synced device.'
+                : confirmDelete === 'all'
+                  ? 'This clears the guest readings shown here, any unreadable guest history, and all guest recovery copies in this browser.'
+                  : 'This reading will be removed from this device.'}{' '}
+              {(confirmDelete !== 'all' || !journalUid || clearReview) && 'This cannot be undone.'}
+            </p>
+            <div className="modal-actions">
+              <button className="button button-secondary" onClick={() => setConfirmDelete(null)}>
+                Keep {confirmDelete === 'all' ? 'Readings' : 'Reading'}
+              </button>
+              <button
+                className="button button-danger"
+                disabled={Boolean(journalUid && confirmDelete === 'all' && !clearReview)}
+                onClick={deleteReadings}
+              >
+                {confirmDelete === 'all' ? 'Clear All Readings' : 'Delete Reading'}
+              </button>
+            </div>
+          </Modal>
+        )}
+        {copyText && (
+          <Modal title="Copy your reading" onClose={() => setCopyText(null)}>
+            <p>Your browser couldn’t access the clipboard. Select and copy the text below.</p>
+            <textarea
+              className="copy-fallback"
+              aria-label="Reading text to copy"
+              readOnly
+              value={copyText}
+              onFocus={(event) => event.target.select()}
+              rows={12}
+            />
+          </Modal>
+        )}
+      </div>
+    </JournalContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { TestRouter } from '../test/TestRouter';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { refreshAccount, sendVerification, signOutAccount } from '../cloud/journal';
 import type { Reading } from '../domain/types';
@@ -27,7 +27,7 @@ const person = { uid: 'first', email: 'one@example.org', emailVerified: false };
 
 describe('journal account controls', () => {
   it('links guests directly to the sign-in and signup pages', () => {
-    render(<AccountPanel user={null} />, { wrapper: MemoryRouter });
+    render(<AccountPanel user={null} />, { wrapper: TestRouter });
     expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
     expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/signup');
   });
@@ -35,7 +35,7 @@ describe('journal account controls', () => {
   it('resends and checks verification and signs out after pending writes finish', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<AccountPanel user={person} signOutDisabled />, {
-      wrapper: MemoryRouter,
+      wrapper: TestRouter,
     });
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Send verification email' }));

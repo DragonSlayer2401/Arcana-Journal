@@ -69,6 +69,7 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
     .getByRole('link', { name: /^Journal/ })
     .click();
   await page.getByRole('button', { name: /^Open reading:/ }).click();
+  await expect(page).toHaveURL('/');
   await page.reload();
   expect((await saved(page)).readings[0].cards).toEqual(original.cards);
   expect((await saved(page)).readings[0].revealed).toEqual([true, false, false]);

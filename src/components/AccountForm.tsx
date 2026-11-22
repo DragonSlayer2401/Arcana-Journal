@@ -1,8 +1,11 @@
-import { useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+'use client';
+
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useJournalSession } from '../App';
 import { resetPassword, signIn, signUp } from '../cloud/journal';
 import { accountError } from './accountError';
-import './AccountForm.css';
 
 type FormMode = 'signIn' | 'signUp' | 'reset';
 const titles = { signIn: 'Sign in', signUp: 'Create account', reset: 'Reset password' };
@@ -13,20 +16,27 @@ const descriptions = {
 };
 
 export const AccountForm = ({ mode }: { mode: FormMode }) => {
-  const [email, setEmail] = useState('');
+  const { opening, user, authEmail: email, setAuthEmail: setEmail } = useJournalSession();
+  const router = useRouter();
+  useEffect(() => {
+    if (user) router.replace('/journal');
+  }, [user, router]);
+  if (user) return null;
   return (
     <section className="auth-page" aria-labelledby="auth-title">
       <h1 id="auth-title">{titles[mode]}</h1>
-      <AccountFields key={mode} mode={mode} email={email} setEmail={setEmail} />
+      <AccountFields key={mode} opening={opening} mode={mode} email={email} setEmail={setEmail} />
     </section>
   );
 };
 
 const AccountFields = ({
+  opening,
   mode,
   email,
   setEmail,
 }: {
+  opening?: boolean;
   mode: FormMode;
   email: string;
   setEmail: (email: string) => void;
@@ -45,7 +55,7 @@ const AccountFields = ({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || opening) return;
     setError('');
     if (signup && confirmation !== password) {
       setCheckConfirmation(true);
@@ -84,7 +94,7 @@ const AccountFields = ({
         <p className="auth-description" role="status">
           If {email.trim()} is eligible for a password reset, check its inbox for a reset link.
         </p>
-        <Link className="button button-secondary" to="/login">
+        <Link className="button button-secondary" prefetch={false} href="/login">
           Back to sign in
         </Link>
       </>
@@ -110,7 +120,7 @@ const AccountFields = ({
           autoCapitalize="none"
           spellCheck={false}
           required
-          disabled={busy}
+          disabled={busy || opening}
           value={email}
           onChange={(event) => setEmail(event.target.value)}
         />
@@ -125,7 +135,7 @@ const AccountFields = ({
               minLength={signup ? 6 : undefined}
               aria-describedby={signup ? 'auth-password-hint' : undefined}
               required
-              disabled={busy}
+              disabled={busy || opening}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
@@ -144,7 +154,7 @@ const AccountFields = ({
                   aria-invalid={mismatch || undefined}
                   aria-describedby={mismatch ? 'auth-password-mismatch' : undefined}
                   required
-                  disabled={busy}
+                  disabled={busy || opening}
                   value={confirmation}
                   onChange={(event) => setConfirmation(event.target.value)}
                 />
@@ -159,7 +169,7 @@ const AccountFields = ({
               <input
                 type="checkbox"
                 checked={trusted}
-                disabled={busy}
+                disabled={busy || opening}
                 onChange={(event) => setTrusted(event.target.checked)}
               />
               Stay signed in and keep my journal available offline on this trusted device.
@@ -171,18 +181,24 @@ const AccountFields = ({
             {error}
           </p>
         )}
-        <button className="button button-gold" type="submit" disabled={busy}>
+        <button className="button button-gold" type="submit" disabled={busy || opening}>
           {busy ? 'Please wait…' : reset ? 'Send reset email' : titles[mode]}
         </button>
       </form>
       <div className="auth-links">
         {mode === 'signIn' ? (
           <>
-            <Link to="/reset-password">Forgot password?</Link>
-            <Link to="/signup">Create account</Link>
+            <Link prefetch={false} href="/reset-password">
+              Forgot password?
+            </Link>
+            <Link prefetch={false} href="/signup">
+              Create account
+            </Link>
           </>
         ) : (
-          <Link to="/login">{reset ? 'Back to sign in' : 'Sign in'}</Link>
+          <Link prefetch={false} href="/login">
+            {reset ? 'Back to sign in' : 'Sign in'}
+          </Link>
         )}
       </div>
     </>

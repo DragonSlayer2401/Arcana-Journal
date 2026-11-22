@@ -28,6 +28,25 @@ test('Reading and the logo return an open spread to the draw form and keep its j
   expect(readings[1]).toEqual(original);
 });
 
+test('offline route changes keep a draft question in the mounted reading session', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
+  const question = page.getByLabel(/What’s on your mind/);
+  await question.fill('A draft that exists only in this tab');
+  await context.setOffline(true);
+  await page.getByRole('link', { name: 'Deck', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Card library' })).toBeVisible();
+  await page.getByRole('link', { name: 'Reading', exact: true }).click();
+  await expect(question).toHaveValue('A draft that exists only in this tab');
+  await page.goBack();
+  await expect(page).toHaveURL('/deck');
+  await page.goBack();
+  await expect(question).toHaveValue('A draft that exists only in this tab');
+});
+
 for (const [path, title, navigation] of [
   ['/deck', 'Card library', 'Deck'],
   ['/journal', 'Your reading journal.', 'Journal'],

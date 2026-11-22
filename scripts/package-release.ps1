@@ -10,7 +10,7 @@ function Write-ProjectZip {
   $archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create)
   try {
     foreach ($file in $Files) {
-      $resolved = [System.IO.Path]::GetFullPath($file)
+      $resolved = [System.IO.Path]::GetFullPath($file, $Root)
       if (-not $resolved.StartsWith($Root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Archive source escaped project: $resolved"
       }
@@ -20,12 +20,16 @@ function Write-ProjectZip {
   } finally { $archive.Dispose(); $stream.Dispose() }
 }
 
-$sourceFiles = & rg --files --hidden $projectRoot -g '!node_modules/**' -g '!dist/**' -g '!test-results/**' -g '!playwright-report/**' -g '!release/**' -g '!.git/**' -g '!art/references/style-reference.png' -g '!art/references/rws/**' -g '!art/previews/**' -g '!art/generated/**/*.png' -g '!art/generated/*.png'
-if ($LASTEXITCODE -ne 0) { throw 'Unable to list project files.' }
-$buildRoot = Join-Path $projectRoot 'dist'
-if (-not (Test-Path -LiteralPath (Join-Path $buildRoot 'sw.js'))) { throw 'Run npm run build before packaging.' }
-$buildFiles = & rg --files --hidden --no-ignore $buildRoot
-if ($LASTEXITCODE -ne 0) { throw 'Unable to list build files.' }
-Write-ProjectZip -Destination (Join-Path $releaseRoot 'ArcanaJournal-source.zip') -Root $projectRoot -Files $sourceFiles
-Write-ProjectZip -Destination (Join-Path $releaseRoot 'ArcanaJournal-cloudflare.zip') -Root $buildRoot -Files $buildFiles
-Get-ChildItem -LiteralPath $releaseRoot -Filter '*.zip' | Select-Object Name, Length
+Push-Location -LiteralPath $projectRoot
+try {
+  if (!(Test-Path -LiteralPath '.next/BUILD_ID') -or !(Test-Path -LiteralPath 'public/sw.js')) {
+    throw 'Run npm run build before packaging.'
+  }
+  $sourceFiles = & rg --files --hidden --no-require-git -g '!.git/' -g '!.env*' -g '!art/generated/**/*.png'
+  if ($LASTEXITCODE -ne 0) { throw 'Unable to list project files.' }
+  $buildFiles = & rg --files --hidden --no-ignore .next public -g '!.next/cache/' -g '!.next/dev/' -g '!.next/diagnostics/' -g '!.next/types/' -g '!.next/trace*'
+  if ($LASTEXITCODE -ne 0) { throw 'Unable to list build files.' }
+  $buildFiles += 'package.json', 'package-lock.json', 'next.config.mjs', 'LICENSE'
+  Write-ProjectZip -Destination (Join-Path $releaseRoot 'ArcanaJournal-source.zip') -Root $projectRoot -Files $sourceFiles
+  Write-ProjectZip -Destination (Join-Path $releaseRoot 'ArcanaJournal-nextjs.zip') -Root $projectRoot -Files $buildFiles
+} finally { Pop-Location }

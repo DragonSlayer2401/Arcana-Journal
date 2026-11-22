@@ -1,33 +1,46 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
 import { webcrypto } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { createContext, runInContext } from 'node:vm';
+import { buildWorker } from './build-sw.mjs';
+import appPaths from '../src/routes.json' with { type: 'json' };
 
 // Exercise the generated production worker, with the network/cache lifecycle
 // controlled by this harness. This does not replace real-browser PWA checks.
-const execute = promisify(execFile);
-const generator = fileURLToPath(new URL('./build-sw.mjs', import.meta.url));
+const buildId = 'fixture-build';
+const chunk = '/_next/static/chunks/app/(journal)/page.js';
+const html = (id, label) => `<!doctype html><html><body>${label} (build ${id})</body></html>`;
 const bodies = new Map([
-  ['/index.html', '<!doctype html><html><body>Stilllight test</body></html>'],
-  ['/assets/app.js', 'console.log("test fixture");'],
+  [chunk, 'console.log("test fixture");'],
   ['/manifest.webmanifest', '{"name":"Stilllight fixture"}'],
 ]);
+const snapshot = (path, ext = 'html') =>
+  '/_next/static/' + buildId + '/offline/' + (path.slice(1) || 'index') + '.' + ext;
+for (const path of appPaths) {
+  bodies.set(snapshot(path), html(buildId, 'Offline ' + path));
+  bodies.set(snapshot(path, 'rsc'), 'Full Flight tree for ' + path);
+}
 let testRoot;
 let code;
 
 before(async () => {
   testRoot = await mkdtemp(join(tmpdir(), 'stilllight-sw-test-'));
-  await mkdir(join(testRoot, 'dist', 'assets'), { recursive: true });
-  for (const [url, body] of bodies) await writeFile(join(testRoot, 'dist', url.slice(1)), body);
-  await writeFile(join(testRoot, 'dist', '_headers'), '/sw.js\n  Cache-Control: no-cache');
-  await execute(process.execPath, [generator], { cwd: testRoot });
-  code = await readFile(join(testRoot, 'dist', 'sw.js'), 'utf8');
+  for (const [url, body] of bodies) {
+    const file = join(
+      testRoot,
+      url.startsWith('/_next/')
+        ? decodeURIComponent(url).replace('/_next/', '.next/')
+        : 'public' + url,
+    );
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(file, body);
+  }
+  await writeFile(join(testRoot, 'public', '_headers'), '/sw.js\n  Cache-Control: no-cache');
+  await buildWorker(testRoot, buildId);
+  code = await readFile(join(testRoot, 'public', 'sw.js'), 'utf8');
 });
 
 after(async () => {
@@ -46,6 +59,7 @@ const harness = () => {
   const fetches = [];
   let online = true;
   let substitutePath = null;
+  let liveBuild = buildId;
   let claimed = false;
   let skipWaitingCalls = 0;
   const context = createContext({
@@ -62,6 +76,10 @@ const harness = () => {
       if (!online) throw new Error('Offline fixture');
       const path = new URL(request.url).pathname;
       fetches.push(path);
+      if (appPaths.includes(path))
+        return new Response(html(liveBuild, 'Live response for ' + request.url), {
+          headers: { 'x-arcana-build': liveBuild },
+        });
       return new Response(
         substitutePath === path ? '<html>Unexpected fallback</html>' : bodies.get(path),
         {
@@ -121,10 +139,15 @@ const harness = () => {
     });
     return value;
   };
-  const request = async (path, mode = 'navigate') => {
+  const request = async (path, mode = 'navigate', headers = {}) => {
     let response;
     listeners.get('fetch')({
-      request: { url: new URL(path, 'https://stilllight.test').href, method: 'GET', mode },
+      request: {
+        url: new URL(path, 'https://stilllight.test').href,
+        method: 'GET',
+        mode,
+        headers: new Headers(headers),
+      },
       respondWith: (promise) => {
         response = promise;
       },
@@ -142,6 +165,9 @@ const harness = () => {
     },
     substitute: (path) => {
       substitutePath = path;
+    },
+    deploy: (id) => {
+      liveBuild = id;
     },
     get claimed() {
       return claimed;
@@ -167,28 +193,70 @@ test('offline navigation and assets are served from the installed version', asyn
   const sw = harness();
   await sw.dispatch('install');
   sw.setOnline(false);
-  assert.equal(await (await sw.request('/?reading=active')).text(), bodies.get('/index.html'));
+  for (const path of appPaths) {
+    assert.equal(
+      await (await sw.request(path + '?reading=active')).text(),
+      bodies.get(snapshot(path)),
+    );
+    const flight = await sw.request(path + '?_rsc=cachebust', 'cors', {
+      rsc: '1',
+      'next-router-state-tree': 'current-tree',
+    });
+    assert.equal(flight.headers.get('Content-Type'), 'text/x-component');
+    assert.equal(await flight.text(), bodies.get(snapshot(path, 'rsc')));
+  }
+  const trailing = await sw.request('/deck/?view=all');
+  assert.equal(trailing.status, 307);
+  assert.equal(trailing.headers.get('Location'), 'https://stilllight.test/deck?view=all');
+  const unknown = await sw.request('/some-old-bookmark');
+  assert.equal(unknown.status, 307);
+  assert.equal(unknown.headers.get('Location'), 'https://stilllight.test/');
   assert.equal(
-    await (await sw.request('/assets/app.js', 'cors')).text(),
-    bodies.get('/assets/app.js'),
+    await (await sw.request(chunk.replace('(', '%28').replace(')', '%29'), 'cors')).text(),
+    bodies.get(chunk),
   );
   assert.equal((await sw.status()).ready, true);
+});
+
+test('partial prefetch, action, and query-specific requests are never answered with an offline Flight payload', async () => {
+  const sw = harness();
+  await sw.dispatch('install');
+  sw.setOnline(false);
+  for (const header of ['next-router-prefetch', 'next-router-segment-prefetch', 'next-action']) {
+    assert.equal(await sw.request('/deck', 'cors', { rsc: '1', [header]: '1' }), undefined);
+  }
+  assert.equal(await sw.request('/deck?q=private', 'cors', { rsc: '1' }), undefined);
+  assert.equal(await sw.request('/deck', 'cors'), undefined);
+});
+
+test('online navigation returns fresh SSR while offline snapshots stay anonymous and match the active build', async () => {
+  const sw = harness();
+  await sw.dispatch('install');
+  const path = '/journal?note=private';
+  assert.match(await (await sw.request(path)).text(), /Live response.*note=private/);
+  sw.deploy('different-build');
+  assert.equal(await (await sw.request(path)).text(), bodies.get(snapshot('/journal')));
+  const oldFlight = await sw.request('/journal?_rsc=new-deployment', 'cors', { rsc: '1' });
+  assert.equal(await oldFlight.text(), bodies.get(snapshot('/journal', 'rsc')));
+  sw.setOnline(false);
+  assert.equal(await (await sw.request(path)).text(), bodies.get(snapshot('/journal')));
+  assert.equal(sw.ownCache.has(path), false);
 });
 
 test('a missing required entry cannot report ready offline and can be repaired online', async () => {
   const sw = harness();
   await sw.dispatch('install');
-  sw.ownCache.delete('/assets/app.js');
+  sw.ownCache.delete(chunk);
   sw.setOnline(false);
   assert.equal((await sw.status()).ready, false);
   sw.setOnline(true);
   assert.equal((await sw.status()).ready, true);
-  assert.equal(await sw.ownCache.get('/assets/app.js').text(), bodies.get('/assets/app.js'));
+  assert.equal(await sw.ownCache.get(chunk).text(), bodies.get(chunk));
 });
 
 test('an HTTP 200 response with substituted bytes fails installation before cache writes', async () => {
   const sw = harness();
-  sw.substitute('/assets/app.js');
+  sw.substitute(chunk);
   await assert.rejects(sw.dispatch('install'), /Unable to cache required asset/);
   assert.equal(sw.ownCache.size, 0);
   assert.equal((await sw.status()).ready, false);
@@ -197,10 +265,10 @@ test('an HTTP 200 response with substituted bytes fails installation before cach
 test('a failed installation never erases an existing same-version cache', async () => {
   const sw = harness();
   await sw.dispatch('install');
-  sw.substitute('/assets/app.js');
+  sw.substitute(chunk);
   await assert.rejects(sw.dispatch('install'), /Unable to cache required asset/);
   assert.equal((await sw.status()).ready, true);
-  assert.equal(await sw.ownCache.get('/assets/app.js').text(), bodies.get('/assets/app.js'));
+  assert.equal(await sw.ownCache.get(chunk).text(), bodies.get(chunk));
 });
 
 test('updates never skip waiting; obsolete caches are removed only at activation', async () => {
@@ -223,9 +291,12 @@ test('updates never skip waiting; obsolete caches are removed only at activation
 
 test('asset content changes produce a different cache version', async () => {
   const beforeVersion = code.match(/const CACHE_NAME = CACHE_PREFIX \+ '([^']+)'/)[1];
-  await writeFile(join(testRoot, 'dist', 'assets', 'app.js'), 'console.log("new build");');
-  await execute(process.execPath, [generator], { cwd: testRoot });
-  const changed = await readFile(join(testRoot, 'dist', 'sw.js'), 'utf8');
+  await writeFile(
+    join(testRoot, '.next/static/chunks/app/(journal)/page.js'),
+    'console.log("new build");',
+  );
+  await buildWorker(testRoot, buildId);
+  const changed = await readFile(join(testRoot, 'public', 'sw.js'), 'utf8');
   const afterVersion = changed.match(/const CACHE_NAME = CACHE_PREFIX \+ '([^']+)'/)[1];
   assert.notEqual(beforeVersion, afterVersion);
 });

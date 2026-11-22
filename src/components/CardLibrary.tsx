@@ -3,12 +3,11 @@ import { DECK } from '../data/deck';
 import type { TarotCard } from '../domain/types';
 import { CardArtwork } from './CardArtwork';
 import { Modal } from './Modal';
-import './CardLibrary.css';
 
 const collections = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'] as const;
 const collectionOf = (card: TarotCard) => card.suit ?? 'Major Arcana';
 
-export const CardLibrary = () => {
+export const CardLibrary = ({ opening = false }: { opening?: boolean }) => {
   const [search, setSearch] = useState('');
   const [collection, setCollection] = useState('All cards');
   const [selected, setSelected] = useState<TarotCard | null>(null);
@@ -29,6 +28,7 @@ export const CardLibrary = () => {
         <label>
           Search cards
           <input
+            disabled={opening}
             type="search"
             placeholder="Search by card name"
             value={search}
@@ -37,7 +37,11 @@ export const CardLibrary = () => {
         </label>
         <label>
           Arcana or suit
-          <select value={collection} onChange={(event) => setCollection(event.target.value)}>
+          <select
+            disabled={opening}
+            value={collection}
+            onChange={(event) => setCollection(event.target.value)}
+          >
             <option>All cards</option>
             {collections.map((name) => (
               <option key={name}>{name}</option>
@@ -73,6 +77,7 @@ export const CardLibrary = () => {
                 <li key={card.id}>
                   <button
                     className="library-card"
+                    disabled={opening}
                     aria-haspopup="dialog"
                     onClick={() => setSelected(card)}
                   >

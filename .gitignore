@@ -1,4 +1,8 @@
 node_modules/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+public/sw.js
 dist/
 playwright-report/
 test-results/

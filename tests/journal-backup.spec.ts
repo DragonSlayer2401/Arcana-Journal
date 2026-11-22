@@ -211,7 +211,7 @@ test('a rejected file leaves the journal intact and a corrected file merges with
     });
 
   await upload([imported, { ...imported, id: 'invalid-reading', revealed: [] }]);
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('main').getByRole('alert')).toBeVisible();
   expect(await savedJournal(page)).toEqual(existing);
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
 
@@ -268,13 +268,13 @@ test('a failed storage write leaves both journals intact and the same backup can
   });
   await importFile(page, backup);
   await page.getByRole('button', { name: 'Confirm import' }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('main').getByRole('alert')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
   expect(await savedJournal(page)).toEqual(existing);
 
   await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('button', { name: /^Open reading: A new idea/ })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('main').getByRole('alert')).toHaveCount(0);
   const recovered = await savedJournal(page);
   expect(recovered.readings).toHaveLength(2);
   expect(recovered.readings).toEqual(expect.arrayContaining([existing.readings[0], incoming]));

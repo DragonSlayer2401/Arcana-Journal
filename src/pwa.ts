@@ -16,7 +16,11 @@ export const subscribeOfflineStatus = (
       callback(status, Boolean(registration?.waiting || pendingUpdate?.state === 'installed'));
   };
 
-  if (!import.meta.env.PROD || !globalThis.isSecureContext || !('serviceWorker' in navigator)) {
+  if (
+    process.env.NODE_ENV !== 'production' ||
+    !globalThis.isSecureContext ||
+    !('serviceWorker' in navigator)
+  ) {
     report('unavailable');
     return () => {
       disposed = true;

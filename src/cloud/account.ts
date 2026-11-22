@@ -19,6 +19,7 @@ import {
   signInWithEmailAndPassword,
   signOut,
   updateCurrentUser,
+  type Auth,
   type Persistence,
   type User,
 } from 'firebase/auth';
@@ -46,7 +47,7 @@ import {
 import { loadRecoveryCopies } from '../domain/readingRecovery';
 import { StorageLockUnavailableError, withStorageLock } from '../domain/storageLock';
 
-const useEmulators = import.meta.env.MODE === 'emulator';
+const useEmulators = process.env.NEXT_PUBLIC_FIREBASE_EMULATORS === 'true';
 const config = {
   apiKey: useEmulators ? 'demo-arcana-journal' : 'AIzaSyBv7MUeAR9AKuIxtTl9Bo-OflYtye7yHZk',
   authDomain: 'arcana-journal.firebaseapp.com',
@@ -54,7 +55,6 @@ const config = {
   appId: '1:119895825487:web:d615c201127d7eb9e4de3a',
   messagingSenderId: '119895825487',
 };
-const app = initializeApp(config);
 interface LoginOwner {
   uid: string;
   login?: string;
@@ -88,7 +88,7 @@ const withLoginStorage = async <T>(operation: () => Promise<T>): Promise<T> => {
 // Firebase owns the credential key and the callback that reconciles its Auth
 // instance with the saved user. Both belong to the primary persistence manager.
 const loginPersistenceManager = () => {
-  const sdk = auth as typeof auth & {
+  const sdk = getBrowserAuth() as Auth & {
     persistenceManager?: {
       fullUserKey: string;
       boundEventHandler: StorageListener;
@@ -219,6 +219,7 @@ const ownerCheckedProvider = (
         typeof value.uid !== 'string'
       )
         return super._set(key, value);
+      const auth = getBrowserAuth();
       const uid = value.uid;
       // setPersistence tries to copy the outgoing user to the new store. Only
       // the newly authenticated user belongs in the chosen persistence.
@@ -286,42 +287,49 @@ const ownerCheckedProvider = (
     }
   };
 };
-const localLogin = ownerCheckedProvider(browserLocalPersistence, () => localStorage, true);
-const sessionLogin = ownerCheckedProvider(browserSessionPersistence, () => sessionStorage);
-const auth = initializeAuth(app, {
-  persistence: [localLogin, sessionLogin, inMemoryPersistence],
-});
-// Firebase skips this hook for storage notifications. Bind a new generation
-// only to the user authenticated by this tab's own credential request.
-beforeAuthStateChanged(auth, async (user) => {
-  if (newLogin && user?.email?.toLowerCase() === newLogin.email) {
-    newLogin.user = user;
-    // A failed password must never change the previous session's trust. This
-    // callback runs after credential verification and before the user is saved.
-    const manager = loginPersistenceManager();
-    const previous = manager.persistence;
-    movingLogin = { owner: newLogin.previous, toShared: newLogin.trusted };
-    try {
-      await setPersistence(auth, newLogin.trusted ? localLogin : sessionLogin);
-    } finally {
-      movingLogin = undefined;
-      // setPersistence changes the SDK's store but leaves its storage listener
-      // on the provider chosen at startup. A restored session has no listener
-      // for trusted logins until we subscribe its new provider here.
-      if (previous !== manager.persistence)
-        previous._removeListener(manager.fullUserKey, manager.boundEventHandler);
-      manager.persistence._addListener(manager.fullUserKey, manager.boundEventHandler);
+let browserAuth: Auth | undefined;
+const getBrowserAuth = (): Auth => {
+  if (browserAuth) return browserAuth;
+  if (typeof window === 'undefined') throw new Error('Journal accounts require a browser.');
+  const localLogin = ownerCheckedProvider(browserLocalPersistence, () => localStorage, true);
+  const sessionLogin = ownerCheckedProvider(browserSessionPersistence, () => sessionStorage);
+  const auth = initializeAuth(initializeApp(config), {
+    persistence: [localLogin, sessionLogin, inMemoryPersistence],
+  });
+  // Firebase skips this hook for storage notifications. Bind a new generation
+  // only to the user authenticated by this tab's own credential request.
+  beforeAuthStateChanged(auth, async (user) => {
+    if (newLogin && user?.email?.toLowerCase() === newLogin.email) {
+      newLogin.user = user;
+      // A failed password must never change the previous session's trust. This
+      // callback runs after credential verification and before the user is saved.
+      const manager = loginPersistenceManager();
+      const previous = manager.persistence;
+      movingLogin = { owner: newLogin.previous, toShared: newLogin.trusted };
+      try {
+        await setPersistence(auth, newLogin.trusted ? localLogin : sessionLogin);
+      } finally {
+        movingLogin = undefined;
+        // setPersistence changes the SDK's store but leaves its storage listener
+        // on the provider chosen at startup. A restored session has no listener
+        // for trusted logins until we subscribe its new provider here.
+        if (previous !== manager.persistence)
+          previous._removeListener(manager.fullUserKey, manager.boundEventHandler);
+        manager.persistence._addListener(manager.fullUserKey, manager.boundEventHandler);
+      }
     }
-  }
-  // Firebase also initiates a sign-out when the server invalidates a current
-  // credential. A storage notification skips this hook and grants no removal.
-  if (!user && auth.currentUser && !signingOutOwner)
-    invalidatedOwner = currentLogin(auth.currentUser);
-});
-void auth.authStateReady().then(() => {
-  restoringAuth = false;
-});
-if (useEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    // Firebase also initiates a sign-out when the server invalidates a current
+    // credential. A storage notification skips this hook and grants no removal.
+    if (!user && auth.currentUser && !signingOutOwner)
+      invalidatedOwner = currentLogin(auth.currentUser);
+  });
+  void auth.authStateReady().then(() => {
+    restoringAuth = false;
+  });
+  if (useEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  browserAuth = auth;
+  return auth;
+};
 
 const memoryAuthFor = (app: FirebaseApp) => {
   const instance = initializeAuth(app, { persistence: inMemoryPersistence });
@@ -377,13 +385,13 @@ const asAccount = (user: User | null): JournalUser | null => {
 
 const explicitTrust = new WeakMap<User, boolean>();
 const journalTrust = (uid: string): boolean | undefined => {
-  const owner = auth.currentUser;
+  const owner = getBrowserAuth().currentUser;
   if (!owner || owner.uid !== uid) return undefined;
   // Auth restores both legacy and current sessions from the persistence chosen
   // at sign-in. Firebase has a public setter but no public getter. Isolate its
   // persistence-type getter here so a separate Web Storage write never decides
   // whether a shared-device session may save private readings.
-  const sdk = auth as typeof auth & { _getPersistenceType?: () => string };
+  const sdk = getBrowserAuth() as Auth & { _getPersistenceType?: () => string };
   const type = sdk._getPersistenceType?.();
   if (type === 'LOCAL') return true;
   if (type === 'SESSION' || type === 'NONE') return false;
@@ -392,7 +400,7 @@ const journalTrust = (uid: string): boolean | undefined => {
 export const isOfflineJournalEnabled = (uid: string) => journalTrust(uid) === true;
 
 const requireAccount = (uid: string): User => {
-  const user = auth.currentUser;
+  const user = getBrowserAuth().currentUser;
   if (!user || user.uid !== uid) throw new Error('The journal account has changed. Please retry.');
   return user;
 };
@@ -448,7 +456,7 @@ const savedJournalLock = (uid: string): string | null | undefined => {
 };
 
 export const isJournalLockedInThisTabOnly = (uid: string): boolean => {
-  const user = auth.currentUser;
+  const user = getBrowserAuth().currentUser;
   if (user?.uid !== uid) return false;
   const relock = tabRelocks.get(user);
   if (!relock) return false;
@@ -466,7 +474,7 @@ export const isJournalLockedInThisTabOnly = (uid: string): boolean => {
 };
 
 export const isJournalLocked = (uid: string): boolean => {
-  const user = auth.currentUser;
+  const user = getBrowserAuth().currentUser;
   if (user?.uid !== uid) return true;
   if (isJournalLockedInThisTabOnly(uid)) return true;
   const generation = savedJournalLock(uid);
@@ -481,6 +489,7 @@ export const isJournalLocked = (uid: string): boolean => {
 };
 
 export const observeJournalLock = (uid: string, onChange: () => void): (() => void) => {
+  const auth = getBrowserAuth();
   // The displayed journal may still belong to the previous user while the new
   // user's ID token is being verified. Invalidate its view immediately.
   const stopAccount = onAuthStateChanged(auth, onChange);
@@ -729,6 +738,7 @@ const releaseAccount = () => {
 const trustedAppName = (uid: string) => 'journal-' + uid + '-device';
 
 export const databaseFor = (uid: string): Promise<Firestore> => {
+  const auth = getBrowserAuth();
   const user = requireVerifiedAccount(uid);
   const trusted = journalTrust(uid);
   if (trusted === undefined)
@@ -860,7 +870,7 @@ const restoreInterruptedSignOut = (): InterruptedSignOut | null => {
   }
   return null;
 };
-let interruptedSignOut = restoreInterruptedSignOut();
+let interruptedSignOut = typeof window === 'undefined' ? null : restoreInterruptedSignOut();
 const setInterruptedSignOut = (record: InterruptedSignOut | null) => {
   interruptedSignOut = record;
   try {
@@ -899,12 +909,14 @@ const checkedAccount = async (
 };
 const notifyCheckedAccount = async (user: User | null) => {
   const account = await checkedAccount(user);
-  if (auth.currentUser !== user) throw new Error('The journal account has changed. Please retry.');
+  if (getBrowserAuth().currentUser !== user)
+    throw new Error('The journal account has changed. Please retry.');
   const visible = visibleAccount(account);
   for (const listener of refreshListeners) listener(visible);
   return visible;
 };
 export const observeAccount = (onUser: (user: JournalUser | null) => void): (() => void) => {
+  const auth = getBrowserAuth();
   let active = true;
   let revision = 0;
   let previous: User | null | undefined;
@@ -1015,7 +1027,11 @@ const checkRestoredSession = (user: User) => {
     } catch (error) {
       notice = removalError(error);
     }
-    if (auth.currentUser === user && loginGeneration(user) === generation && !removalReceipt(user))
+    if (
+      getBrowserAuth().currentUser === user &&
+      loginGeneration(user) === generation &&
+      !removalReceipt(user)
+    )
       recordRemoval(user, notice);
   };
   const pending = check().finally(() => restoredChecks.delete(user));
@@ -1062,6 +1078,7 @@ const authenticate = (email: string, password: string, trusted: boolean, registe
       // Check before Firebase switches its in-memory user; the actual shared
       // credential write also takes the lock when it is ready to publish.
       if (trusted) await withLoginStorage(async () => {});
+      const auth = getBrowserAuth();
       const current = auth.currentUser;
       newLogin = {
         generation: 'login-' + crypto.randomUUID(),
@@ -1088,11 +1105,7 @@ const authenticate = (email: string, password: string, trusted: boolean, registe
     }
   });
 
-const returnToJournal = () => ({
-  url:
-    (useEmulators ? window.location.origin : 'https://arcana-journal.jacobskip7.workers.dev') +
-    '/journal',
-});
+const returnToJournal = () => ({ url: new URL('/journal', window.location.origin).href });
 export const signIn = (email: string, password: string, trusted = false) =>
   authenticate(email, password, trusted, false);
 export const signUp = async (email: string, password: string, trusted = false) => {
@@ -1100,10 +1113,12 @@ export const signUp = async (email: string, password: string, trusted = false) =
   await sendVerification();
 };
 export const sendVerification = async () => {
+  const auth = getBrowserAuth();
   if (!auth.currentUser) throw new Error('Sign in to verify your email.');
   await sendEmailVerification(auth.currentUser, returnToJournal());
 };
 export const refreshAccount = async () => {
+  const auth = getBrowserAuth();
   const user = auth.currentUser;
   if (user) {
     await reload(user);
@@ -1121,7 +1136,7 @@ export const refreshAccount = async () => {
   return notifyCheckedAccount(user);
 };
 export const resetPassword = (email: string) =>
-  sendPasswordResetEmail(auth, email.trim(), returnToJournal());
+  sendPasswordResetEmail(getBrowserAuth(), email.trim(), returnToJournal());
 
 export const resetLockedJournalPassword = (uid: string) => {
   const owner = requireAccount(uid);
@@ -1164,6 +1179,7 @@ export const trackWrite = <T>(uid: string, operation: Promise<T>): Promise<T> =>
   return operation;
 };
 export const signOutAccount = async (displayedUid?: string) => {
+  const auth = getBrowserAuth();
   const user = auth.currentUser;
   const interrupted = interruptedSignOut;
   const uid = interrupted?.uid ?? user?.uid;

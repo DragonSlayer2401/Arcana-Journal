@@ -1,12 +1,10 @@
 # Arcana Journal
 
-A tarot PWA built with React, TypeScript, and Vite. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
+Arcana Journal is a server-rendered Next.js tarot PWA built with React and TypeScript. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
 
 Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
 
-Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. The sign-in, signup, and password-reset forms also support direct links. Cloudflare serves the app at these paths using the [static asset rules](https://developers.cloudflare.com/workers/static-assets/redirects/#proxying) in `public/_redirects`. After offline setup, the service worker serves the cached pages. Account requests need a connection.
-
-Cloudflare serves the static build. Firebase Authentication handles optional email/password accounts, and Cloud Firestore stores each account's journal. Draws and card illustrations work on the device. The Firebase Spark plan covers these services within its free quotas.
+The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. The response includes the reading form, the 78-card library or the appropriate page heading. After hydration, Firebase Authentication restores the session and the browser opens its guest or account journal. Draws, private readings and browser storage stay client-side.
 
 ## Run it
 
@@ -17,17 +15,17 @@ npm ci
 npm run dev
 ```
 
-Open the local address printed by Vite. A fresh checkout without a lockfile can use `npm install`; the delivered project includes a lockfile, so prefer `npm ci`.
+Open the local address printed by Next.js, normally [localhost:3000](http://localhost:3000).
 
 ```sh
 npm run typecheck
 npm run format:check
 npm test
 npm run build
-npm run preview
+npm start
 ```
 
-`npm run build` checks TypeScript and the full illustrated deck, creates `dist`, generates the versioned service worker, and verifies that all 78 images are included in its cache manifest. **Deploy the entire resulting `dist` folder.** Running `vite build` directly omits these checks and the service-worker generation step. `npm run dev` intentionally does not install a service worker; use the production preview to test offline behavior.
+`npm run build` validates the artwork, compiles the production app to `.next/`, captures the six public routes for offline use and writes the versioned worker to `public/sw.js`. Use `npm start` to run the production server or `npm run preview` to bind it to loopback. Service worker registration runs in production.
 
 The generated worker also has a focused, dependency-free lifecycle harness:
 
@@ -35,7 +33,7 @@ The generated worker also has a focused, dependency-free lifecycle harness:
 node --test scripts/test-sw.mjs
 ```
 
-It checks complete-asset readiness, offline navigation, cache repair, rejected substituted content, version changes, and safe update activation. It builds temporary fixtures without changing the project's `dist` directory.
+It checks complete-asset readiness, offline navigation, cache repair, rejected substituted content, version changes, and safe update activation. The tests use temporary build fixtures.
 
 For browser automation:
 
@@ -113,7 +111,7 @@ When upgrading, let **Clear History** and queued changes finish in older tabs be
 
 ### Firebase setup for this deployment
 
-The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize `arcana-journal.jacobskip7.workers.dev` for email redirects, and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize the deployment hostname for email redirects (the existing hostname is `arcana-journal.jacobskip7.workers.dev`), and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
 
 Publish `firestore.rules` before releasing the frontend. The rules allow the optional, immutable `sourceId` used to restore readings whose legacy IDs collided. They also cover the account-specific document that coordinates imports with **Clear History**. Publish the rules in **Firestore → Rules**, or run the following command from this directory while signed in to the project.
 
@@ -127,40 +125,23 @@ The account and security-rule integration tests run against local emulators in a
 firebase emulators:exec --only auth,firestore --project demo-arcana-journal "npm run test:cloud"
 ```
 
-Build with `npm run build` and publish `dist` to the existing Cloudflare Workers static-assets deployment at [Arcana Journal](https://arcana-journal.jacobskip7.workers.dev). The Pages instructions below apply to new Pages installations.
-
 ## Offline behavior and updates
 
 `scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
 
 After **Ready for offline use** appears, guests can draw, reveal, and revisit saved readings offline. Trusted-device accounts can use cached readings and sync changes after reconnecting. Asset caching needs one successful online load first, including a launch of the Home Screen app if it uses separate storage. Browsers can evict cached data.
 
-Navigation and built assets are served from the active worker's own versioned cache. Updates install in the background and wait for all old app tabs/windows to close. There is no automatic `skipWaiting`, forced reload, or draw on update. When the interface announces an available update, finish your reading, close every Arcana Journal Safari tab and the standalone app, then reopen. Persisted identities and orientations remain unchanged. A simple refresh may keep the old worker active; closing all clients allows the new one to activate.
+Online navigation uses the running Next.js server. When offline, the worker can restore a public page and its matching JavaScript, CSS and card assets from the active build. Updates install in the background and wait for all old app tabs/windows to close. There is no automatic `skipWaiting`, forced reload, or draw on update. When the interface announces an available update, finish your reading, close every Arcana Journal Safari tab and the standalone app, then reopen. Persisted identities and orientations remain unchanged. A simple refresh may keep the old worker active; closing all clients allows the new one to activate.
 
-HTTPS is required for the deployed PWA. Localhost is permitted for development. Opening `dist/index.html` as a file or serving an ordinary unencrypted LAN address is not a valid PWA test. These service-worker restrictions are documented by [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
+Service workers require HTTPS in production and also work on localhost. [Service worker requirements](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
 
-## Deploy free on Cloudflare Pages
+## Deploy the SSR app
 
-This is a static site with no Pages Functions. Cloudflare Pages' included `pages.dev` address supplies HTTPS; no domain purchase is needed. The project fits the [Pages Free plan's static asset limits](https://developers.cloudflare.com/pages/platform/limits/).
+On a Node.js host, install dependencies with `npm ci`, build with `npm run build`, and start the service with `npm start`. Set `PORT` to the port assigned by your host and serve it over HTTPS. Keep the whole production build together, including `.next/`, `public/` and the generated `public/sw.js`. [Next.js deployment guide](https://nextjs.org/docs/app/getting-started/deploying)
 
-1. In this project directory, run `npm ci` and `npm run build`.
-2. Sign in to a free [Cloudflare account](https://dash.cloudflare.com/) and open **Workers & Pages**.
-3. Create an application, select **Pages**, and choose **Direct Upload** / **Drag and drop your files**. Dashboard wording can vary; choose upload of prebuilt assets.
-4. For a new installation, give the project a name, for example `arcana-journal` (availability determines the final address). If updating an existing installation, keep its current Pages project and production address.
-5. Drag the **`dist` folder** into the upload area, or select it. Its root must contain `index.html`, `sw.js`, `manifest.webmanifest`, icons, `cards/`, and `assets/`. Do not upload the source project, `node_modules`, or an extra parent folder. The provided `release/ArcanaJournal-cloudflare.zip` contains this same ready-to-upload directory content.
-6. Choose **Deploy site** / **Save and Deploy** and wait for success. Open the supplied `https://<project-name>.pages.dev` address.
-7. Wait until the application reports **Ready for offline use**, then test a reading and a reload.
+To package a completed build on Windows, run `./scripts/package-release.ps1` in PowerShell. Extract `release/ArcanaJournal-nextjs.zip` on the Node.js host, run `npm ci --omit=dev` there, then `npm start`.
 
-For updates, rebuild and use **Create a new deployment** in the same Pages project to upload the new `dist`. Keeping the same production address preserves the storage origin and access to existing history. This applies to the Arcana Journal rebrand too: update the existing project rather than creating or renaming its address just to match the new app name. Direct Upload projects cannot later switch to Git integration; automatic Git deployments require a new project. These steps follow [Cloudflare's Direct Upload guide](https://developers.cloudflare.com/pages/get-started/direct-upload/).
-
-Optional terminal deployment, using browser login rather than an application API key:
-
-```sh
-npx wrangler login
-npx wrangler pages deploy dist
-```
-
-The app itself does not need Wrangler, Cloudflare credentials, or any environment variables. No deployment has occurred merely by building this folder.
+The existing Cloudflare Workers site used a static-assets upload. Serving this version on that hostname requires a Worker that can run Next.js SSR. Keep the same production origin when moving the runtime so returning users retain access to guest journals and trusted-device storage. [Cloudflare Workers guide for Next.js](https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/)
 
 ## Add to your iPhone Home Screen
 
