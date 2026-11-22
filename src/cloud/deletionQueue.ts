@@ -12,7 +12,6 @@ import {
   type DeletionCheck,
   type StoredDeletion,
 } from './deletionStore';
-import DeletionCheckWorker from './checkDeletion.worker.js?worker&inline';
 
 export interface PendingDeletion extends StoredDeletion {
   durable: boolean;
@@ -147,7 +146,7 @@ const checkFromWorker = async (check: DeletionCheck, timeoutMs = 1500): Promise<
   let worker: Worker | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    worker = new DeletionCheckWorker();
+    worker = new Worker(new URL('./checkDeletion.worker.js', import.meta.url));
     const reader = worker;
     return await new Promise<boolean | null>((resolve) => {
       timer = setTimeout(() => resolve(null), timeoutMs);

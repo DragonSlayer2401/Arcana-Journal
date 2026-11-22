@@ -1,0 +1,22 @@
+export { initializeApp, deleteApp } from 'firebase/app';
+export {
+  beforeAuthStateChanged,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  connectAuthEmulator,
+  createUserWithEmailAndPassword,
+  EmailAuthProvider,
+  initializeAuth,
+  inMemoryPersistence,
+  onAuthStateChanged,
+  onIdTokenChanged,
+  reauthenticateWithCredential,
+  reload,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  setPersistence,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signOut,
+  updateCurrentUser,
+} from 'firebase/auth';

@@ -3,6 +3,22 @@ import { CARD_BY_ID, DECK } from '../src/data/deck';
 
 const cardNamePattern = new RegExp(`^(?:${DECK.map((card) => card.name).join('|')})$`);
 
+test('a filtered deck URL restores the same cards on an offline reload', async ({
+  page,
+  context,
+}) => {
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.goto('/deck?q=queen&suit=Cups');
+  await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByRole('button', { name: cardNamePattern })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Queen of Cups', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Queen of Cups' })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});
+
 test('the full card library, filters, artwork and both meanings work offline on small screens', async ({
   page,
   context,

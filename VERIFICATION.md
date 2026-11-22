@@ -1,6 +1,28 @@
 # Verification record
 
-Verified on November 19, 2026, on Windows. This is a local production build; no Cloudflare deployment or physical iPhone test was performed.
+## Server rendering review, November 22, 2026
+
+All six App Router pages returned HTTP 200 with their route-specific title, description and primary heading when JavaScript was disabled. The initial HTML included the reading and account forms, public help, and an anonymous loading state for the journal. The deck contained all 78 entries and 156 meanings. A browser with JavaScript disabled submitted a search and suit filter, expanded the resulting card to read both meanings, and cleared an empty result. A filtered deck URL also restored the same card after reloading offline with JavaScript enabled. The server bundle excludes Firebase Auth and Firestore. The browser loads Firestore when a verified account opens its journal.
+
+TypeScript and the production build passed. The build included 138 required offline assets. All 214 unit tests, 11 service-worker tests, 96 browser tests, the deployment-update test and 81 Firebase emulator integration tests passed.
+
+## Vercel build, November 22, 2026
+
+A local Linux build using Vercel’s Next.js adapter produced six SSR functions. Each served HTML and a React Server Component response for its route. All 129 entries in the service worker’s cache manifest matched the packaged files by SHA-256, including all 78 card illustrations and both offline responses for each route.
+
+## Next.js App Router migration, November 22, 2026
+
+The production build renders all six application routes on demand. With JavaScript disabled, direct requests show the reading form, all 78 deck entries, the journal heading and each account form. Browser authentication and journal restoration run after hydration.
+
+- TypeScript, 214 Vitest tests and nine generated service worker tests passed.
+- All 90 Playwright checks passed across desktop Chromium, mobile Chromium and mobile WebKit. The separate deployment-update test also passed.
+- The production worker verifies 131 offline assets. A browser kept its unsaved draft while navigating offline and restored saved readings across a deployment update.
+- All 44 Firebase SDK integration scenarios and 37 account UI workflows passed against the local Auth and Firestore emulators.
+- The packaged Node.js release served the deck over HTTP and supplied every asset with its expected digest.
+
+## Earlier Vite build, November 19, 2026
+
+Verified locally on Windows on November 19, 2026. Mobile checks used browser emulation.
 
 ## Passed automated checks
 

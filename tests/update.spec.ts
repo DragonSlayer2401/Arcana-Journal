@@ -38,7 +38,9 @@ test('a cached update waits for all app windows to close and preserves the exact
   request,
 }) => {
   expect((await request.post('/__test__/deploy/1')).ok()).toBe(true);
-  await page.goto('/');
+  const firstResponse = await page.goto('/');
+  const buildId = await firstResponse!.headerValue('x-arcana-build');
+  expect(buildId).toBeTruthy();
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   const originalWorker = await readOfflineReply(page);
   expect(originalWorker.ready).toBe(true);
@@ -81,7 +83,8 @@ test('a cached update waits for all app windows to close and preserves the exact
 
   // A second app window also keeps the update waiting after the first closes.
   const secondWindow = await context.newPage();
-  await secondWindow.goto('/');
+  const oldDocument = await secondWindow.goto('/');
+  expect(await oldDocument!.headerValue('x-arcana-build')).toBe(buildId);
   await expect(secondWindow.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   expect((await readOfflineReply(secondWindow)).version).toBe(originalWorker.version);
   expect(await savedData(secondWindow)).toEqual(original);
@@ -104,7 +107,8 @@ test('a cached update waits for all app windows to close and preserves the exact
     .toBe(true);
 
   const reopened = await context.newPage();
-  await reopened.goto('/');
+  const newDocument = await reopened.goto('/');
+  expect(await newDocument!.headerValue('x-arcana-build')).toBe(buildId + '-v2');
   await expect(reopened.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   expect((await readOfflineReply(reopened)).version).toBe(waitingWorker.version);
   expect(await savedData(reopened)).toEqual(original);

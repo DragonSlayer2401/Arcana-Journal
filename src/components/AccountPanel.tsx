@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import Link from 'next/link';
 import {
   refreshAccount,
   retryOfflineRemoval,
@@ -8,7 +8,6 @@ import {
   type JournalUser,
 } from '../cloud/journal';
 import { accountError } from './accountError';
-import './AccountPanel.css';
 
 interface Props {
   user: JournalUser | null;
@@ -68,10 +67,10 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled, onLock }: Prop
             </button>
           ) : (
             <>
-              <Link className="button button-gold" to="/login">
+              <Link className="button button-gold" prefetch={false} href="/login">
                 Sign in
               </Link>
-              <Link className="button button-secondary" to="/signup">
+              <Link className="button button-secondary" prefetch={false} href="/signup">
                 Create account
               </Link>
             </>

@@ -3,32 +3,26 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { chromium, expect, webkit } from '@playwright/test';
-import { createServer } from 'vite';
+import { startEmulatorApp } from './emulator-app.mjs';
 import { verifyEmulatorEmail } from './emulator-email.mjs';
 import { testPortableJournals } from './portable-journal-workflows.mjs';
+
+let server;
+before(async () => {
+  server = await startEmulatorApp();
+});
+after(() => server?.close());
 
 const withApp =
   (run, browserType = chromium) =>
   async () => {
-    const emulators = await (await fetch('http://127.0.0.1:4400/emulators')).json();
-    assert.equal(emulators.auth.port, 9099);
-    assert.equal(emulators.firestore.port, 8080);
-    const server = await createServer({
-      mode: 'emulator',
-      logLevel: 'warn',
-      server: { host: '127.0.0.1', port: 0, hmr: false },
-    });
-    let browser;
+    const browser = await browserType.launch();
     try {
-      await server.listen();
-      const base = 'http://127.0.0.1:' + server.httpServer.address().port;
-      browser = await browserType.launch();
-      await run(base, browser);
+      await run(server.base, browser);
     } finally {
-      await browser?.close();
-      await server.close();
+      await browser.close();
     }
   };
 
@@ -154,7 +148,7 @@ test(
       revealed: [false],
     })).sort((a, b) => hash(a.id).localeCompare(hash(b.id)));
     const uid = await second.evaluate(async (archive) => {
-      const { createReading, observeAccount } = await import('/src/cloud/journal.ts');
+      const { createReading, observeAccount } = window.kit.journal;
       const uid = await new Promise((resolve) => {
         const stop = observeAccount((user) => {
           stop();
@@ -176,7 +170,7 @@ test(
     };
     await second.evaluate(
       async ({ uid, reading }) => {
-        const { createReading } = await import('/src/cloud/journal.ts');
+        const { createReading } = window.kit.journal;
         await createReading(uid, reading);
       },
       { uid, reading: afterReview },
@@ -233,7 +227,7 @@ test(
       const recreated = archive[101];
       await second.evaluate(
         async ({ uid, readings }) => {
-          const { createReading } = await import('/src/cloud/journal.ts');
+          const { createReading } = window.kit.journal;
           await Promise.all(readings.map((reading) => createReading(uid, reading)));
         },
         { uid, readings: [replaced, recreated] },
@@ -259,9 +253,9 @@ test(
 
 const retainTabReading = (page, reading) =>
   page.evaluate(async (reading) => {
-    const { observeAccount } = await import('/src/cloud/journal.ts');
-    const { saveTabRecoveryCopy } = await import('/src/domain/tabRecovery.ts');
-    const { retainRecoveryCopies } = await import('/src/domain/readingRecovery.ts');
+    const { observeAccount } = window.kit.journal;
+    const { saveTabRecoveryCopy } = window.kit;
+    const { retainRecoveryCopies } = window.kit.readingRecovery;
     const uid = await new Promise((resolve) => {
       const stop = observeAccount((user) => {
         stop();
@@ -466,9 +460,7 @@ test(
     await authenticate(base, reader, email, password, { signup: true });
     await authenticate(base, writer, email, password);
     const uid = await writer.evaluate(async () => {
-      const { observeAccount, clearReadings, createReading } = await import(
-        '/src/cloud/journal.ts'
-      );
+      const { observeAccount, clearReadings, createReading } = window.kit.journal;
       const uid = await new Promise((resolve) => {
         const stop = observeAccount((user) => {
           stop();
@@ -511,7 +503,7 @@ test(
     await reader.waitForFunction(() => window.receivedBackupPage, undefined, { timeout: 5000 });
     try {
       await writer.evaluate(async (uid) => {
-        const { clearReadings } = await import('/src/cloud/journal.ts');
+        const { clearReadings } = window.kit.journal;
         await clearReadings(uid);
       }, uid);
     } finally {
@@ -727,7 +719,7 @@ test(
     await page.getByRole('button', { name: 'Lock journal' }).click();
     await expect(page.getByRole('heading', { name: 'Journal locked' })).toBeVisible();
     await expect(page.getByText(question)).toHaveCount(0);
-    await expect(page.getByRole('alert')).toContainText(/only lock this tab/i);
+    await expect(page.getByRole('main').getByRole('alert')).toContainText(/only lock this tab/i);
     await expect(page.getByRole('button', { name: 'Export journal' })).toHaveCount(0);
     await expect(sibling.getByRole('heading', { name: email })).toBeVisible();
     await context.setOffline(false);
@@ -784,7 +776,7 @@ for (const browserType of [chromium, webkit]) {
       await expect(page.getByText(question)).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Export available readings' })).toHaveCount(0);
       await page.getByRole('button', { name: 'Retry sign out' }).click();
-      await expect(page.getByRole('alert')).toHaveCount(2);
+      await expect(page.getByRole('main').getByRole('alert')).toHaveCount(2);
       await expect(page.getByRole('button', { name: 'Retry sign out' })).toBeEnabled();
       await page.evaluate(() => window.restoreSignOutStorage());
       await page.reload();
@@ -833,8 +825,8 @@ for (const mixedLocks of [false, true])
         revealed: [true],
       };
       await writer.evaluate(async (reading) => {
-        const { observeAccount } = await import('/src/cloud/account.ts');
-        const { saveTabRecoveryCopy } = await import('/src/domain/tabRecovery.ts');
+        const { observeAccount } = window.kit.journal;
+        const { saveTabRecoveryCopy } = window.kit;
         const uid = await new Promise((resolve) => {
           const stop = observeAccount((user) => {
             stop();
@@ -885,8 +877,8 @@ test(
     // Simulate closing the importer after its cloud commit, with a more recent
     // reveal still in the original account's local recovery copy.
     const key = await page.evaluate(async (reading) => {
-      const { observeAccount } = await import('/src/cloud/account.ts');
-      const { saveRecoveryCopy } = await import('/src/domain/readingRecovery.ts');
+      const { observeAccount } = window.kit.journal;
+      const { saveRecoveryCopy } = window.kit.readingRecovery;
       const uid = await new Promise((resolve) => {
         const stop = observeAccount((user) => {
           stop();
@@ -986,7 +978,7 @@ test(
       revealed: [false],
     };
     const assigned = await writer.evaluate(async (reading) => {
-      const { collisionReadingId } = await import('/src/domain/journalBackup.ts');
+      const { collisionReadingId } = window.kit;
       return { ...reading, id: await collisionReadingId(reading) };
     }, original);
     await importReadings(reader, [original, assigned]);
@@ -994,10 +986,9 @@ test(
 
     await writer.evaluate(
       async ({ original, assigned }) => {
-        const { observeAccount } = await import('/src/cloud/account.ts');
-        const { loadRecoveryCopies, importTargetRecorder, saveRecoveryCopy } = await import(
-          '/src/domain/readingRecovery.ts'
-        );
+        const { observeAccount } = window.kit.journal;
+        const { loadRecoveryCopies, importTargetRecorder, saveRecoveryCopy } =
+          window.kit.readingRecovery;
         const uid = await new Promise((resolve) => {
           const stop = observeAccount((user) => {
             stop();
@@ -1056,8 +1047,8 @@ test(
     const uid = await retainTabReading(session, reading);
     const { missingHash, cloudBefore } = await writer.evaluate(
       async ({ uid, reading }) => {
-        const { createReading, exportAccountJournal } = await import('/src/cloud/journal.ts');
-        const { saveTabRecoveryCopy } = await import('/src/domain/tabRecovery.ts');
+        const { createReading, exportAccountJournal } = window.kit.journal;
+        const { saveTabRecoveryCopy } = window.kit;
         await Promise.all(
           Array.from({ length: 51 }, (_, index) =>
             createReading(uid, {
@@ -1232,7 +1223,7 @@ for (const reservation of ['worker lock', 'legacy IndexedDB']) {
         await expect(reader.getByRole('link', { name: 'Download backup' })).toHaveCount(0);
         await assert.rejects(
           reader.evaluate(async () => {
-            const { observeAccount, exportAccountJournal } = await import('/src/cloud/journal.ts');
+            const { observeAccount, exportAccountJournal } = window.kit.journal;
             const uid = await new Promise((resolve) => {
               const stop = observeAccount((user) => {
                 stop();
@@ -1338,7 +1329,7 @@ test(
     ).toHaveCount(0);
     await assert.rejects(
       restricted.evaluate(async () => {
-        const { observeAccount, exportAccountJournal } = await import('/src/cloud/journal.ts');
+        const { observeAccount, exportAccountJournal } = window.kit.journal;
         const uid = await new Promise((resolve) => {
           const stop = observeAccount((user) => {
             stop();
@@ -1376,8 +1367,8 @@ test(
 
     const reveal = { ...reading, revealed: [true] };
     await restricted.evaluate(async (reveal) => {
-      const { observeAccount } = await import('/src/cloud/journal.ts');
-      const { saveRecoveryCopy } = await import('/src/domain/readingRecovery.ts');
+      const { observeAccount } = window.kit.journal;
+      const { saveRecoveryCopy } = window.kit.readingRecovery;
       const uid = await new Promise((resolve) => {
         const stop = observeAccount((user) => {
           stop();
@@ -1401,7 +1392,7 @@ test(
       .poll(
         () =>
           restored.evaluate(async () => {
-            const { observeAccount, exportAccountJournal } = await import('/src/cloud/journal.ts');
+            const { observeAccount, exportAccountJournal } = window.kit.journal;
             const uid = await new Promise((resolve) => {
               const stop = observeAccount((user) => {
                 stop();
@@ -1449,10 +1440,8 @@ test(
     };
     // An interrupted clear left a recovery copy that never had a cloud target.
     const uid = await first.evaluate(async (reading) => {
-      const { observeAccount } = await import('/src/cloud/account.ts');
-      const { saveRecoveryCopy, prepareRecoveryDeletion } = await import(
-        '/src/domain/readingRecovery.ts'
-      );
+      const { observeAccount } = window.kit.journal;
+      const { saveRecoveryCopy, prepareRecoveryDeletion } = window.kit.readingRecovery;
       const uid = await new Promise((resolve) => {
         const stop = observeAccount((user) => {
           stop();
@@ -1494,7 +1483,7 @@ test(
       .poll(() =>
         reopened.evaluate(
           async ({ uid, id }) => {
-            const { loadRecoveryCopies } = await import('/src/domain/readingRecovery.ts');
+            const { loadRecoveryCopies } = window.kit.readingRecovery;
             return loadRecoveryCopies(uid).prepared.some((copy) => copy.targetId === id);
           },
           { uid, id: reading.id },
@@ -1563,7 +1552,7 @@ test(
       await openTabsWithMemoryOnlyWrites(base, browser, true);
     const signOut = sibling.getByRole('button', { name: 'Sign out' });
     await signOut.click();
-    await expect(sibling.getByRole('alert')).toContainText(/tab/i);
+    await expect(sibling.getByRole('main').getByRole('alert')).toContainText(/tab/i);
     await expect(writer.getByRole('heading', { name: question })).toBeVisible();
     await expect(writer.getByRole('button', { name: 'Sign out' })).toBeDisabled();
 
@@ -2074,7 +2063,9 @@ test(
     }
     await reopened.getByLabel('Password', { exact: true }).fill(password);
     await reopened.getByRole('button', { name: 'Unlock journal' }).click();
-    await expect(reopened.getByRole('alert')).toContainText(/connect to the internet/i);
+    await expect(reopened.getByRole('main').getByRole('alert')).toContainText(
+      /connect to the internet/i,
+    );
     await assertLocked(reopened);
     await trusted.unroute(firebase);
     // A separate device should receive the persisted draw and reveal while this
@@ -2088,7 +2079,7 @@ test(
     await ownerDevice.close();
     await reopened.getByLabel('Password', { exact: true }).fill(otherPassword);
     await reopened.getByRole('button', { name: 'Unlock journal' }).click();
-    await expect(reopened.getByRole('alert')).toBeVisible();
+    await expect(reopened.getByRole('main').getByRole('alert')).toBeVisible();
     await assertLocked(reopened);
     await reopened.getByRole('button', { name: 'Send password reset email' }).click();
     await expect(reopened.getByRole('status')).toContainText(/check your account inbox/i);

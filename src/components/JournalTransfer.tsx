@@ -10,7 +10,6 @@ import type { Reading } from '../domain/types';
 import type { RecoveryCopy } from '../domain/readingRecovery';
 import type { WatchExportHistory } from '../cloud/journal';
 import { Modal } from './Modal';
-import './AccountPanel.css';
 
 export interface ImportCounts {
   added: number;

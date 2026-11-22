@@ -985,6 +985,16 @@ h1 {
   padding-top: 18px;
   border-top: 1px solid var(--line);
 }
+.help-disclosure {
+  max-width: 68ch;
+  margin: 1rem auto;
+}
+.help-disclosure summary {
+  cursor: pointer;
+}
+.help-disclosure[open] summary {
+  margin-bottom: 1rem;
+}
 .modal .help-footnote {
   font-size: 0.8125rem;
   color: #a99bb7;

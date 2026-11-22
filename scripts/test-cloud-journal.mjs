@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import { chromium } from '@playwright/test';
-import { createServer } from 'vite';
+import { startEmulatorApp } from './emulator-app.mjs';
 import { verifyEmulatorEmail } from './emulator-email.mjs';
 
 // Run with the Auth and Firestore emulators for demo-arcana-journal. The
@@ -10,43 +10,9 @@ import { verifyEmulatorEmail } from './emulator-email.mjs';
 let server;
 let browser;
 let base;
-const harness = '/journal-emulator-test.js';
 before(async () => {
-  const response = await fetch('http://127.0.0.1:4400/emulators');
-  const emulators = await response.json();
-  assert.equal(emulators.firestore.port, 8080);
-  assert.equal(emulators.auth.port, 9099);
-  server = await createServer({
-    configFile: false,
-    cacheDir: 'node_modules/.vite-journal-tests',
-    mode: 'emulator',
-    logLevel: 'warn',
-    server: { host: '127.0.0.1', port: 0, hmr: false },
-    optimizeDeps: { include: ['firebase/app', 'firebase/auth', 'firebase/firestore'] },
-    plugins: [
-      {
-        name: 'journal-emulator-test',
-        configureServer(vite) {
-          vite.middlewares.use('/test', (_request, response) => {
-            response.setHeader('Content-Type', 'text/html');
-            response.end('<!doctype html><title>Journal emulator test</title>');
-          });
-        },
-        resolveId: (id) => (id === harness ? id : undefined),
-        load: (id) =>
-          id === harness
-            ? [
-                "export * as journal from '/src/cloud/journal.ts';",
-                "export { databaseFor } from '/src/cloud/account.ts';",
-                "export { getAuth } from 'firebase/auth';",
-                "export * as firestore from 'firebase/firestore';",
-              ].join('\n')
-            : undefined,
-      },
-    ],
-  });
-  await server.listen();
-  base = 'http://127.0.0.1:' + server.httpServer.address().port;
+  server = await startEmulatorApp();
+  base = server.base;
   browser = await chromium.launch();
 });
 after(async () => {
@@ -56,8 +22,8 @@ after(async () => {
 
 const loadHarness = async (page) => {
   await page.goto(base + '/test');
-  await page.evaluate(async (path) => {
-    window.kit = await import(path);
+  await page.waitForFunction(() => window.kit);
+  await page.evaluate(async () => {
     window.observeUser = () =>
       new Promise((resolve) => {
         const stop = window.kit.journal.observeAccount((user) => {
@@ -65,7 +31,9 @@ const loadHarness = async (page) => {
           resolve(user);
         });
       });
-  }, harness);
+    // The application starts Auth when its first browser observer subscribes.
+    await window.observeUser();
+  });
   return page;
 };
 const open = async (context) => loadHarness(await context.newPage());
@@ -411,8 +379,8 @@ for (const storage of [
       // never turn a blocked, exact-ID database probe into an unchecked read.
       const probe = await importer.evaluate(
         async ({ uid, id }) => {
-          const { deletionReservationName } = await import('/src/cloud/deletionReservation.ts');
-          const { checkDeletion } = await import('/src/cloud/deletionStore.ts');
+          const { deletionReservationName } = window.kit;
+          const { checkDeletion } = window.kit;
           const name = await deletionReservationName(uid, id);
           const start = performance.now();
           const busy = await checkDeletion({ kind: 'database', name });
@@ -753,10 +721,8 @@ test('recovery reuses the assigned collision ID after the earlier occupant is de
   const result = await page.evaluate(
     async ({ uid, original }) => {
       const { journal } = window.kit;
-      const { collisionReadingId } = await import('/src/domain/journalBackup.ts');
-      const { loadRecoveryCopies, saveRecoveryCopy } = await import(
-        '/src/domain/readingRecovery.ts'
-      );
+      const { collisionReadingId } = window.kit;
+      const { loadRecoveryCopies, saveRecoveryCopy } = window.kit.readingRecovery;
       const primary = { ...original, question: 'The primary occupant' };
       const blocker = { ...primary, id: await collisionReadingId(original) };
       await journal.createReading(uid, primary);
@@ -821,7 +787,7 @@ for (const denied of ['reading the retained copy', 'writing the assigned ID']) {
       async ({ uid, original, denied }) => {
         const { journal } = window.kit;
         const { loadRecoveryCopies, saveRecoveryCopy, retainRecoveryCopies, removeRecoveryCopies } =
-          await import('/src/domain/readingRecovery.ts');
+          window.kit.readingRecovery;
         const collision = denied === 'writing the assigned ID';
         if (collision)
           await journal.createReading(uid, { ...original, question: 'Prior occupant' });
@@ -915,9 +881,7 @@ test('a one-reading backup updates its explicit ID when a local receipt names an
   const result = await page.evaluate(
     async ({ uid, original }) => {
       const { journal } = window.kit;
-      const { loadRecoveryCopies, saveRecoveryCopy } = await import(
-        '/src/domain/readingRecovery.ts'
-      );
+      const { loadRecoveryCopies, saveRecoveryCopy } = window.kit.readingRecovery;
       const occupant = { ...original, question: 'An older draw at this ID' };
       await journal.createReading(uid, occupant);
       saveRecoveryCopy(uid, original);
@@ -960,7 +924,7 @@ test('account backup restores both explicit IDs of an otherwise ambiguous pair',
   const results = await page.evaluate(
     async ({ uid, original }) => {
       const { journal } = window.kit;
-      const { collisionReadingId } = await import('/src/domain/journalBackup.ts');
+      const { collisionReadingId } = window.kit;
       const alternate = {
         ...original,
         id: await collisionReadingId(original, 73),

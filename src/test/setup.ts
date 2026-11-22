@@ -2,6 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 
+vi.mock('next/link', () => import('./TestLink'));
+
 // jsdom implements neither Web Locks nor IndexedDB. Serialize guest mutations
 // within its single window; the browser suite exercises the real cross-tab locks.
 vi.mock('../domain/guestWrite', () => {

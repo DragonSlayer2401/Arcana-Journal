@@ -23,3 +23,6 @@ export const readingEpoch = (timestamp: string, storedEpoch?: number): number =>
     return NaN;
   return zoned && storedEpoch !== epoch ? NaN : storedEpoch;
 };
+
+export const readingDateLabel = (date: string) =>
+  new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });

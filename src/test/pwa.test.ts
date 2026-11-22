@@ -51,7 +51,7 @@ describe('offline status subscription', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.stubEnv('PROD', true);
+    vi.stubEnv('NODE_ENV', 'production');
     vi.stubGlobal('isSecureContext', true);
     vi.stubGlobal('MessageChannel', TestChannel);
     container = new TestContainer();
@@ -135,7 +135,7 @@ describe('offline status subscription', () => {
   });
 
   it('does not register an offline worker in development mode', () => {
-    vi.stubEnv('PROD', false);
+    vi.stubEnv('NODE_ENV', 'development');
     const report = vi.fn();
     stop = subscribeOfflineStatus(report);
     expect(report).toHaveBeenCalledWith('unavailable', false);

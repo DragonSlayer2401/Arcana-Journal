@@ -43,7 +43,7 @@ export const testPortableJournals = ({
       };
       await importReadings(utc, [legacy, offset, old, abbreviatedOffset]);
       const uid = await utc.evaluate(async () => {
-        const { observeAccount } = await import('/src/cloud/account.ts');
+        const { observeAccount } = window.kit.journal;
         return new Promise((resolve) => {
           const stop = observeAccount((user) => {
             stop();

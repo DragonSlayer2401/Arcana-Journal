@@ -153,7 +153,7 @@ test('an empty guest journal reports partial recovery removal and supports retry
     };
   }, recoveryKey + '.1');
   await clearHistory(page, true);
-  await expect(page.getByRole('alert')).toContainText(
+  await expect(page.getByRole('main').getByRole('alert')).toContainText(
     'Some guest recovery copies may still be on this device',
   );
   expect(await page.evaluate((key) => localStorage.getItem(key), recoveryKey + '.1')).toBe(
