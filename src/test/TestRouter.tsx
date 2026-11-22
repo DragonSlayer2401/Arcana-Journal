@@ -7,7 +7,7 @@ import {
 import { PathnameContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime';
 import JournalShell from '../app/(journal)/JournalShell';
 import Reading from '../app/(journal)/page';
-import Deck from '../app/(journal)/deck/page';
+import { DeckCatalog } from '../app/(journal)/deck/DeckCatalog';
 import Journal from '../app/(journal)/journal/page';
 import Login from '../app/(journal)/login/page';
 import Signup from '../app/(journal)/signup/page';
@@ -15,7 +15,7 @@ import ResetPassword from '../app/(journal)/reset-password/page';
 
 const pages = new Map([
   ['/', Reading],
-  ['/deck', Deck],
+  ['/deck', DeckCatalog],
   ['/journal', Journal],
   ['/login', Login],
   ['/signup', Signup],

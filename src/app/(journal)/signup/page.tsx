@@ -8,13 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return (
-    <AccountForm
-      mode="signUp"
-      heading={<h1 id="auth-title">Create account</h1>}
-      description={
-        <p className="auth-description">Verify your email to sync readings across your devices.</p>
-      }
-    />
-  );
+  return <AccountForm mode="signUp" />;
 }

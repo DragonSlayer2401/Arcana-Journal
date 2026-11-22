@@ -2,9 +2,9 @@
 
 ## Server rendering review, November 22, 2026
 
-All six App Router pages returned HTTP 200 with their route-specific title, description and primary heading when JavaScript was disabled. The initial HTML included all 78 deck entries, the reading and account forms, and an anonymous loading state for the journal. The server bundle excludes Firebase Auth and Firestore. The browser loads Firestore when a verified account opens its journal.
+All six App Router pages returned HTTP 200 with their route-specific title, description and primary heading when JavaScript was disabled. The initial HTML included the reading and account forms, public help, and an anonymous loading state for the journal. The deck contained all 78 entries and 156 meanings. A browser with JavaScript disabled submitted a search and suit filter, expanded the resulting card to read both meanings, and cleared an empty result. A filtered deck URL also restored the same card after reloading offline with JavaScript enabled. The server bundle excludes Firebase Auth and Firestore. The browser loads Firestore when a verified account opens its journal.
 
-TypeScript and the production build passed. The build included 137 required offline assets. All 214 unit tests, 11 service-worker tests, 90 browser tests, the deployment-update test and 81 Firebase emulator integration tests passed.
+TypeScript and the production build passed. The build included 138 required offline assets. All 214 unit tests, 11 service-worker tests, 96 browser tests, the deployment-update test and 81 Firebase emulator integration tests passed.
 
 ## Vercel build, November 22, 2026
 

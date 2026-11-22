@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { CARD_BY_ID } from '../src/data/deck';
 
 test.use({ javaScriptEnabled: false });
 
@@ -24,9 +25,12 @@ test('direct requests render each public page before JavaScript runs', async ({ 
     if (path === '/') {
       await expect(page.getByLabel(/What’s on your mind/)).toBeVisible();
       await expect(page.getByRole('button', { name: /Draw Cards/ })).toBeDisabled();
+      await page.locator('summary').filter({ hasText: 'About Arcana Journal' }).click();
+      await expect(page.getByRole('heading', { name: 'Fair draws, explained' })).toBeVisible();
     } else if (path === '/deck') {
       await expect(page.getByRole('button', { name: 'The Fool', exact: true })).toBeVisible();
       await expect(page.locator('.library-card')).toHaveCount(78);
+      await expect(page.locator('.library-disclosure .card-meaning')).toHaveCount(156);
     } else if (path === '/journal') {
       await expect(page.getByText('Loading readings…')).toBeVisible();
       await expect(page.locator('.journal-entry')).toHaveCount(0);
@@ -35,4 +39,22 @@ test('direct requests render each public page before JavaScript runs', async ({ 
       await expect(page.locator('form button[type="submit"]')).toBeDisabled();
     }
   }
+});
+
+test('the server filters the deck and its meanings open without JavaScript', async ({ page }) => {
+  await page.goto('/deck');
+  await page.getByLabel('Search cards', { exact: true }).fill('queen');
+  await page.getByLabel('Arcana or suit').selectOption('Cups');
+  await page.getByRole('button', { name: 'Filter cards' }).click();
+  await expect(page).toHaveURL(/\/deck\?q=queen&suit=Cups$/);
+  await expect(page.locator('.library-card')).toHaveCount(1);
+  const queen = CARD_BY_ID.get('minor-cups-13')!;
+  await page.getByRole('button', { name: queen.name }).click();
+  await expect(page.getByText(queen.upright.meaning, { exact: true })).toBeVisible();
+  await expect(page.getByText(queen.reversed.meaning, { exact: true })).toBeVisible();
+  await page.getByLabel('Search cards', { exact: true }).fill('unknown card');
+  await page.getByRole('button', { name: 'Filter cards' }).click();
+  await expect(page.getByRole('heading', { name: 'No matching cards' })).toBeVisible();
+  await page.getByRole('link', { name: 'Show all cards' }).click();
+  await expect(page.locator('.library-card')).toHaveCount(78);
 });

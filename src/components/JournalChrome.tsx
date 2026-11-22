@@ -1,77 +1,67 @@
 'use client';
 
-import type { ComponentProps, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useJournalSession } from '../JournalProvider';
 import { Icon } from './Icons';
 
-const NavLink = ({ href, className = '', ...props }: ComponentProps<typeof Link>) => {
-  const current = usePathname() === href;
+interface HeaderLinkProps {
+  href: string;
+  className?: string;
+  children: ReactNode;
+  'aria-label'?: string;
+  markCurrent?: boolean;
+}
+
+export function HeaderLink({
+  href,
+  className = '',
+  markCurrent = true,
+  ...props
+}: HeaderLinkProps) {
+  const pathname = usePathname();
+  const current = markCurrent && pathname === href;
+  const { handleReadingLinkClick } = useJournalSession();
   return (
     <Link
       {...props}
       prefetch={false}
       href={href}
+      onClick={href === '/' ? handleReadingLinkClick : undefined}
       aria-current={current ? 'page' : undefined}
       className={current ? `${className} active`.trim() : className}
     />
   );
-};
+}
 
-export function JournalHeader({ children }: { children: ReactNode }) {
-  const { user, journalUid, account, readings, handleReadingLinkClick, opening, setHelp } =
-    useJournalSession();
+export function SignedOutLinks({ children }: { children: ReactNode }) {
+  const { user } = useJournalSession();
+  return user ? null : <div className="header-account-links">{children}</div>;
+}
+
+export function JournalCount() {
+  const { journalUid, account, readings } = useJournalSession();
+  if (readings.length === 0) return null;
   return (
-    <header className="site-header">
-      <div className="header-identity">
-        <Link
-          className="wordmark"
-          prefetch={false}
-          href="/"
-          aria-label="Arcana Journal, reading"
-          onClick={handleReadingLinkClick}
-        >
-          {children}
-        </Link>
-        {!user && (
-          <div className="header-account-links">
-            <NavLink href="/login">Sign in</NavLink>
-            <NavLink className="header-signup" href="/signup">
-              Create account
-            </NavLink>
-          </div>
-        )}
-      </div>
-      <nav aria-label="Main navigation">
-        <NavLink className="nav-button" href="/" onClick={handleReadingLinkClick}>
-          <Icon name="cards" />
-          <span>Reading</span>
-        </NavLink>
-        <NavLink className="nav-button" href="/deck">
-          <Icon name="library" />
-          <span>Deck</span>
-        </NavLink>
-        <NavLink className="nav-button" href="/journal">
-          <Icon name="book" />
-          <span>Journal</span>
-          {readings.length > 0 && (
-            <span className="nav-count">
-              {readings.length}
-              {journalUid && account.hasMore ? '+' : ''}
-            </span>
-          )}
-        </NavLink>
-        <button
-          className="icon-button help-button"
-          disabled={opening}
-          aria-label="About, installation, and randomness"
-          onClick={() => setHelp(true)}
-        >
-          <Icon name="info" />
-        </button>
-      </nav>
-    </header>
+    <span className="nav-count">
+      {readings.length}
+      {journalUid && account.hasMore ? '+' : ''}
+    </span>
+  );
+}
+
+export function AboutButton() {
+  const { opening, setHelp } = useJournalSession();
+  return (
+    <button
+      className="icon-button help-button"
+      disabled={opening}
+      aria-label="About, installation, and randomness"
+      onClick={() => setHelp(true)}
+    >
+      <Icon name="info" />
+    </button>
   );
 }
 

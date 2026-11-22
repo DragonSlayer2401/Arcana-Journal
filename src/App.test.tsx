@@ -130,8 +130,8 @@ describe('exploring the card library', () => {
     expect(screen.getAllByRole('button', { name: cardNamePattern })).toHaveLength(22);
     await user.type(search, 'no matching tarot card');
     expect(screen.queryAllByRole('button', { name: cardNamePattern })).toHaveLength(0);
-    await user.clear(search);
-    expect(screen.getAllByRole('button', { name: cardNamePattern })).toHaveLength(22);
+    await user.click(screen.getByRole('link', { name: 'Show all cards' }));
+    expect(screen.getAllByRole('button', { name: cardNamePattern })).toHaveLength(78);
     expect(random).not.toHaveBeenCalled();
     await user.click(screen.getByRole('link', { name: 'Reading' }));
     expect(drawButton()).toBeEnabled();

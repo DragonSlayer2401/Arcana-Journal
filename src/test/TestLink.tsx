@@ -8,6 +8,7 @@ export default function TestLink({
   href,
   prefetch,
   onClick,
+  onNavigate,
   children,
   ...props
 }: ComponentProps<typeof Link>) {
@@ -28,7 +29,13 @@ export default function TestLink({
         )
           return;
         event.preventDefault();
-        router.push(String(href));
+        let cancelled = false;
+        onNavigate?.({
+          preventDefault: () => {
+            cancelled = true;
+          },
+        });
+        if (!cancelled) router.push(String(href));
       }}
     >
       {children}

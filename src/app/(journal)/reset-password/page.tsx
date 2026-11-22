@@ -7,15 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function Page() {
-  return (
-    <AccountForm
-      mode="reset"
-      heading={<h1 id="auth-title">Reset password</h1>}
-      description={
-        <p className="auth-description">
-          Enter your account email to request a password reset link.
-        </p>
-      }
-    />
-  );
+  return <AccountForm mode="reset" />;
 }

@@ -68,7 +68,12 @@
   grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
   gap: clamp(12px, 1.8vw, 22px);
 }
+.library-disclosure {
+  height: 100%;
+}
 .library-card {
+  cursor: pointer;
+  list-style: none;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -82,6 +87,20 @@
 .library-card > .card-illustration {
   height: auto;
   aspect-ratio: 2 / 3;
+}
+.library-card::-webkit-details-marker {
+  display: none;
+}
+.library-grid > li:has(.library-disclosure[open]) {
+  grid-column: 1 / -1;
+}
+.library-disclosure[open] .library-card {
+  height: auto;
+  max-width: 10rem;
+}
+.library-inline-meaning {
+  max-width: 65ch;
+  margin-block: 1rem 2rem;
 }
 .library-card > span:last-child {
   flex: 1;
@@ -105,17 +124,17 @@
 .library-dialog .card-detail {
   align-items: start;
 }
-.library-dialog .library-meaning h3 {
+.library-meaning h3 {
   font: 400 1.35rem / 1.2 var(--serif);
   color: var(--gold-bright);
   margin: 0 0 8px;
 }
-.library-dialog .library-keywords {
+.library-keywords {
   color: var(--gold);
   font-size: 0.875rem;
   margin: 0 0 6px;
 }
-.library-dialog .card-meaning {
+.library-meaning .card-meaning {
   margin: 0;
 }
 .library-meaning + .library-meaning {

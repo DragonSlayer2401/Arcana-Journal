@@ -7,36 +7,24 @@ import { readingDateLabel } from '../../domain/readingDate';
 import { CardArtwork } from '../../components/CardArtwork';
 import { Icon } from '../../components/Icons';
 
-const DRAW_OPTIONS = [
-  { key: 'reversals', label: 'Include reversals', hint: 'Allow upright and reversed cards' },
-  { key: 'instantReveal', label: 'Reveal cards instantly', hint: 'Draw your spread face up' },
-] as const;
-
-interface Props {
-  intro: ReactNode;
-  deckPreview: ReactNode;
+export function ReadingWorkspace({
+  children,
+  cardBack,
+}: {
+  children: ReactNode;
   cardBack: ReactNode;
-}
-
-export function ReadingWorkspace({ intro, deckPreview, cardBack }: Props) {
+}) {
   const {
-    opening,
     account,
     reading,
     data,
     journalUid,
-    count,
-    question,
-    setQuestion,
-    updateSettings,
-    draw,
     newReading,
     revealedCount,
     reveal,
     setDetails,
     copyReading,
     copied,
-    error,
   } = useJournalSession();
   return (
     <>
@@ -63,118 +51,7 @@ export function ReadingWorkspace({ intro, deckPreview, cardBack }: Props) {
           </button>
         </section>
       )}
-      {!reading && !data.awaitingNewReading && (
-        <>
-          {intro}
-          <section className="reading-workspace" aria-label="Prepare your reading">
-            {deckPreview}
-            <form className="reading-form" onSubmit={draw}>
-              <div className="form-heading">
-                <span className="mini-star">✧</span>
-                <h2>Make room for a reading</h2>
-              </div>
-              <fieldset disabled={opening}>
-                <legend>Choose your spread</legend>
-                <div className="mode-options">
-                  {(
-                    [
-                      ['one', 'One card', 'A single focus'],
-                      ['three', 'Three cards', 'Room to explore'],
-                      ['custom', 'Custom', 'Your own spread'],
-                    ] as const
-                  ).map(([mode, label, description]) => (
-                    <button
-                      type="button"
-                      key={mode}
-                      aria-pressed={data.settings.mode === mode}
-                      className={
-                        data.settings.mode === mode ? 'mode-option selected' : 'mode-option'
-                      }
-                      onClick={() => updateSettings({ mode })}
-                    >
-                      <span className="mode-glyph" aria-hidden="true">
-                        {mode === 'one' ? '▯' : mode === 'three' ? '▯▯▯' : '✧'}
-                      </span>
-                      <strong>{label}</strong>
-                      <small>{description}</small>
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              {data.settings.mode === 'custom' && (
-                <label className="custom-count">
-                  Number of cards{' '}
-                  <select
-                    disabled={opening}
-                    value={data.settings.customCount}
-                    onChange={(event) =>
-                      updateSettings({ customCount: Number(event.target.value) })
-                    }
-                  >
-                    {Array.from({ length: 10 }, (_, i) => (
-                      <option key={i + 1} value={i + 1}>
-                        {i + 1}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="question-label" htmlFor="question">
-                What’s on your mind? <span>optional</span>
-              </label>
-              <textarea
-                disabled={opening}
-                id="question"
-                value={question}
-                maxLength={2000}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="A question, an intention, or simply an open mind…"
-                rows={3}
-              />
-              <p className="field-hint">A note for your journal. It never influences the draw.</p>
-              {DRAW_OPTIONS.map(({ key, label, hint }) => (
-                <label key={key} className="reading-setting">
-                  <span>
-                    <strong>{label}</strong>
-                    <small>{hint}</small>
-                  </span>
-                  <input
-                    type="checkbox"
-                    disabled={opening}
-                    checked={data.settings[key]}
-                    onChange={(event) => updateSettings({ [key]: event.target.checked })}
-                  />
-                  <span className="switch" aria-hidden="true" />
-                </label>
-              ))}
-              {error && (
-                <p className="notice warning" role="alert">
-                  {error}
-                </p>
-              )}
-              <button disabled={opening} type="submit" className="button button-gold draw-button">
-                <Icon name="spark" /> Draw Cards <span className="button-count">{count}</span>
-              </button>
-              <p className="draw-note">
-                Every card has an equal chance. Every reading starts fresh.
-              </p>
-            </form>
-          </section>
-          <div className="principles">
-            <span>
-              <Icon name="moon" size={17} /> Your own quiet ritual
-            </span>
-            <span>
-              <Icon name="check" size={17} /> Secure, unbiased draws
-            </span>
-            <span>
-              <Icon name="book" size={17} />{' '}
-              {journalUid ? 'Your synced reading journal' : 'A journal on your device'}
-            </span>
-          </div>
-        </>
-      )}
-
+      {!reading && !data.awaitingNewReading && children}
       {reading && (
         <section className="reading-result" aria-label="Your reading">
           <div className="result-heading">

@@ -2,7 +2,7 @@
 
 Arcana Journal is a server-rendered Next.js tarot PWA built with React and TypeScript. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
 
-Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
+Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read its upright and reversed meanings. With JavaScript disabled, you can submit the filters and expand each card to read both meanings in the server-rendered page. The library also works offline once the app reports offline readiness.
 
 Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
 
