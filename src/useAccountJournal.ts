@@ -50,6 +50,8 @@ import {
 const PAGE_SIZE = 50;
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'Please try again.';
+const sameDeletionTarget = (left: Reading, right: Reading) =>
+  left.id === right.id && sameReadingContent(left, right);
 
 interface UnsavedDraw {
   reading: Reading;
@@ -100,6 +102,7 @@ export const useAccountJournal = (
   const [revision, refreshWrites] = useReducer((version: number) => version + 1, 0);
   const writes = useRef(new Set<PendingWrite>()).current;
   const deleting = useRef(new Set<Reading>()).current;
+  const hiddenDeletions = useRef(new Map<Reading, 'pending' | 'committed'>()).current;
   const deletingKeys = useRef(new Set<string>()).current;
   const verifiedRecovery = useRef(new Set<string>()).current;
   const releaseEditLock = useRef<(() => void) | null>(null);
@@ -113,20 +116,27 @@ export const useAccountJournal = (
   const trusted = uid ? isOfflineJournalEnabled(uid) : false;
   useEffect(() => {
     if (!uid) return;
-    let previousCount = 0;
+    let previous: PendingDeletion[] = [];
     return observePendingDeletions(uid, (requests, error, storageUnreadable) => {
       setQueuedDeletions(requests);
       setDeletionStorageUnreadable(storageUnreadable);
       // A replay can delete a reading outside the observed page. Refresh its
       // staged copies even when that page has no changed rows to report.
-      if (requests.length < previousCount) {
+      if (requests.length < previous.length) {
+        // Locally initiated requests also wait for their draft cleanup below.
+        const replayed = previous.filter(
+          (request) =>
+            !requests.some(({ key }) => key === request.key) &&
+            hiddenDeletions.get(request.reading) !== 'pending',
+        );
+        if (!error) replayed.forEach(({ reading }) => hiddenDeletions.set(reading, 'committed'));
+        if (error || replayed.length) setRetry((value) => value + 1);
         setDeletionSyncError('');
-        setRetry((value) => value + 1);
         if (error) setDeleteError(error);
       } else if (error) setDeletionSyncError(error);
-      previousCount = requests.length;
+      previous = requests;
     });
-  }, [uid, trusted, retry]);
+  }, [uid, trusted, retry, hiddenDeletions]);
   const inventory = useMemo(
     () =>
       uid && !locked
@@ -171,6 +181,12 @@ export const useAccountJournal = (
     if (!uid || locked) return;
     let live = true;
     let snapshotVersion = 0;
+    // This subscription starts after these deletions finished. Its cached
+    // rows can be stale, but its first settled server result can show even an
+    // identical reading that was deliberately imported again.
+    const completedBeforeSubscribe = Array.from(hiddenDeletions)
+      .filter(([, stage]) => stage === 'committed')
+      .map(([reading]) => reading);
     const stop = observeReadings(
       uid,
       limit,
@@ -180,6 +196,16 @@ export const useAccountJournal = (
         // A tab can close after a server commit but before deleting its recovery
         // copy. A fresh, acknowledged server snapshot can retire that exact copy.
         if (!state.fromCache && !state.pending) {
+          if (completedBeforeSubscribe.length) {
+            const completed = completedBeforeSubscribe.splice(0);
+            completed.forEach((reading) => hiddenDeletions.delete(reading));
+            setSelected((current) => {
+              const reading = current?.value;
+              return reading && completed.some((target) => sameDeletionTarget(target, reading))
+                ? null
+                : current;
+            });
+          }
           const { copies, prepared } = loadRecoveryCopies(uid);
           verifiedRecovery.clear();
           const lookupMissing = state.hasMore
@@ -244,7 +270,7 @@ export const useAccountJournal = (
       live = false;
       stop();
     };
-  }, [uid, limit, retry, locked, discardCopies, deletingKeys, verifiedRecovery]);
+  }, [uid, limit, retry, locked, discardCopies, deletingKeys, verifiedRecovery, hiddenDeletions]);
 
   // An older active spread can fall outside the journal's current page.
   const listed = readings.find((entry) => entry.id === activeId);
@@ -410,6 +436,10 @@ export const useAccountJournal = (
     }
     let keys: string[];
     let restore: () => void;
+    if (target) {
+      hiddenDeletions.set(target, 'pending');
+      refreshWrites();
+    }
     try {
       let matched = clear ? copies.filter(({ key }) => clear.recoveryKeys.has(key)) : copies;
       if (id !== undefined) {
@@ -459,6 +489,7 @@ export const useAccountJournal = (
       keys = staged.map(({ key }) => key);
       restore = prepareRecoveryDeletion(staged);
     } catch (error) {
+      if (target) hiddenDeletions.delete(target);
       setDeleteError(messageOf(error));
       refreshWrites();
       throw error;
@@ -467,6 +498,7 @@ export const useAccountJournal = (
     const matchesDraft = draft && target && sameReadingContent(draft.reading, target);
     // A rejected draw exists only in this session and can be discarded after confirmation.
     if (id !== undefined && matchesDraft && draft.error) {
+      hiddenDeletions.delete(target);
       drafts.delete(id);
       clearFailedReveal(draft.reading);
       discardCopies(keys.flatMap(recoveryKeysForCopy));
@@ -500,11 +532,16 @@ export const useAccountJournal = (
           if (failed.reading === confirmed) failedReveals.delete(failed);
         }
       } else if (id !== undefined) {
-        if (matchesDraft) drafts.delete(id);
-        if (target) clearFailedReveal(target);
+        if (matchesDraft && drafts.get(id) === draft) drafts.delete(id);
+        if (target) {
+          clearFailedReveal(target);
+          hiddenDeletions.set(target, 'committed');
+          setRetry((value) => value + 1);
+        }
       }
       refreshWrites();
     } catch (error) {
+      if (target) hiddenDeletions.delete(target);
       if (submittedPage) setRetry((value) => value + 1);
       else restore();
       refreshWrites();
@@ -602,13 +639,14 @@ export const useAccountJournal = (
   const findReading = (id: string | null | undefined) =>
     entries.find((reading) => reading.id === id) ??
     (selected && selected.id === id ? selected.value : null);
-  const isQueuedForDeletion = (reading: Reading) =>
-    queuedDeletions.some(
-      (request) =>
-        request.reading.id === reading.id && sameReadingContent(request.reading, reading),
-    );
+  const hiddenTargets = [
+    ...hiddenDeletions.keys(),
+    ...queuedDeletions.map(({ reading }) => reading),
+  ];
+  const isHidden = (reading: Reading) =>
+    hiddenTargets.some((target) => sameDeletionTarget(target, reading));
   const selectedReading = findReading(activeId);
-  const active = selectedReading && !isQueuedForDeletion(selectedReading) ? selectedReading : null;
+  const active = selectedReading && !isHidden(selectedReading) ? selectedReading : null;
   const pending = snapshot.pending || writes.size > 0 || queuedDeletions.length > 0;
   const rejected = Array.from(drafts.values()).filter((draft) => draft.error);
   const rejectedReveal = failedReveals.values().next().value;
@@ -723,7 +761,7 @@ export const useAccountJournal = (
                 : 'Journal synced.';
 
   return {
-    entries: entries.filter((entry) => !isQueuedForDeletion(entry)),
+    entries: entries.filter((entry) => !isHidden(entry)),
     active,
     pending: pending || rejected.length > 0 || failedReveals.size > 0,
     trusted,

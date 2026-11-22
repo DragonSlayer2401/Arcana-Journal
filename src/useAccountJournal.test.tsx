@@ -246,6 +246,7 @@ describe('recovering rejected journal writes', () => {
       await expect(result.current.remove(draw.id)).rejects.toThrow('Denied');
     });
     expect(result.current.deleteError).toContain('confirm again');
+    expect(result.current.entries).toEqual([draw]);
     act(() => result.current.retrySync());
     expect(removeReading).toHaveBeenCalledTimes(1);
     await act(async () => result.current.remove(draw.id));
@@ -867,7 +868,8 @@ describe('recovery copies on a trusted browser', () => {
       await act(async () => result.current.remove(draw.id));
       expect(removeReading).toHaveBeenCalledWith('tester', revealed);
       expect(localStorage.getItem(key)).toBe(JSON.stringify(revealed));
-      await act(async () => publish([{ ...revealed, id: assignedId }], synced));
+      const afterDelete = vi.mocked(observeReadings).mock.lastCall![2];
+      await act(async () => afterDelete([{ ...revealed, id: assignedId }], synced));
       await waitFor(() => expect(localStorage.getItem(key)).toBeNull());
     },
   );

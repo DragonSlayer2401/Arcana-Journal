@@ -443,6 +443,79 @@ describe('account journal workflows', () => {
     expect(cloud.removeReading).not.toHaveBeenCalled();
   });
 
+  it('keeps a confirmed row hidden through stale snapshots and shows a later reimport', async () => {
+    const user = userEvent.setup();
+    signedIn = firstUser;
+    const other = reading('other', 'A reading I am keeping');
+    const cached = { ...synced, fromCache: true };
+    let snapshot!: Parameters<typeof journal.observeReadings>[2];
+    cloud.observeReadings.mockImplementation((_uid, _count, listener) => {
+      snapshot = listener;
+      listener([firstReading, other], cached);
+      return () => {};
+    });
+    let acknowledge!: () => void;
+    cloud.removeReading.mockReturnValueOnce(
+      new Promise((resolve) => {
+        acknowledge = resolve;
+      }),
+    );
+    mount();
+    await user.click(
+      screen.getByRole('button', { name: 'Delete reading: ' + firstReading.question }),
+    );
+    const row = () => screen.queryByRole('heading', { name: firstReading.question });
+    expect(row()).toBeVisible();
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete Reading' }),
+    );
+    expect(row()).toBeNull();
+    expect(screen.getByRole('heading', { name: other.question })).toBeVisible();
+
+    const queue = cloud.observePendingDeletions.mock.lastCall![1];
+    act(() => queue([{ key: 'delete-first', reading: firstReading, durable: true }]));
+    const replacement = { ...firstReading, question: 'A different spread with the same ID' };
+    act(() => snapshot([replacement, other], cached));
+    expect(screen.getByRole('heading', { name: replacement.question })).toBeVisible();
+    act(() => snapshot([firstReading, other], cached));
+    expect(row()).toBeNull();
+
+    act(() => queue([]));
+    expect(row()).toBeNull();
+    await act(async () => acknowledge());
+    expect(row()).toBeNull();
+    act(() => snapshot([other], cached));
+    act(() => snapshot([firstReading, other], cached));
+    expect(row()).toBeNull();
+    act(() => snapshot([other], synced));
+    expect(row()).toBeNull();
+    act(() => snapshot([firstReading, other], synced));
+    expect(row()).toBeVisible();
+  });
+
+  it('hides a replayed deletion until a fresh subscription confirms a reimport', async () => {
+    signedIn = firstUser;
+    const cached = { ...synced, fromCache: true };
+    cloud.observeReadings.mockImplementation((_uid, _count, listener) => {
+      listener([firstReading], cached);
+      return () => {};
+    });
+    mount();
+    const row = () => screen.queryByRole('heading', { name: firstReading.question });
+    const queue = cloud.observePendingDeletions.mock.lastCall![1];
+    const previousSnapshot = cloud.observeReadings.mock.lastCall![2];
+    act(() => queue([{ key: 'replayed', reading: firstReading, durable: true }]));
+    expect(row()).toBeNull();
+    act(() => queue([]));
+    expect(row()).toBeNull();
+    act(() => previousSnapshot([firstReading], synced));
+    expect(row()).toBeNull();
+    const freshSnapshot = cloud.observeReadings.mock.lastCall![2];
+    await act(async () => freshSnapshot([firstReading], synced));
+    expect(row()).toBeVisible();
+    expect(cloud.removeReading).not.toHaveBeenCalled();
+  });
+
   it('requires a new confirmation when the selected reading is replaced while the dialog is open', async () => {
     const user = userEvent.setup();
     signedIn = firstUser;
