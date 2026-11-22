@@ -5,13 +5,14 @@ import {
   type AppRouterInstance,
 } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { PathnameContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime';
-import JournalShell from '../app/(journal)/JournalShell';
+import JournalShell from '@/features/Journal/Journal';
 import Reading from '../app/(journal)/page';
-import { DeckCatalog } from '../app/(journal)/deck/DeckCatalog';
+import { DeckCatalog } from '@/features/Tarot/features/DeckCatalog/DeckCatalog';
 import Journal from '../app/(journal)/journal/page';
-import Login from '../app/(journal)/login/page';
-import Signup from '../app/(journal)/signup/page';
-import ResetPassword from '../app/(journal)/reset-password/page';
+import AccountLayout from '../app/(journal)/(account)/layout';
+import Login from '../app/(journal)/(account)/login/page';
+import Signup from '../app/(journal)/(account)/signup/page';
+import ResetPassword from '../app/(journal)/(account)/reset-password/page';
 
 const pages = new Map([
   ['/', Reading],
@@ -22,10 +23,18 @@ const pages = new Map([
   ['/reset-password', ResetPassword],
 ]);
 export const TestApp = () => {
-  const Page = pages.get(usePathname())!;
+  const pathname = usePathname();
+  const Page = pages.get(pathname)!;
+  const isAccountPage = Page === Login || Page === Signup || Page === ResetPassword;
   return (
     <JournalShell>
-      <Page />
+      {isAccountPage ? (
+        <AccountLayout>
+          <Page />
+        </AccountLayout>
+      ) : (
+        <Page />
+      )}
     </JournalShell>
   );
 };

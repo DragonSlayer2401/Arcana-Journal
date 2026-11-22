@@ -1,0 +1,52 @@
+.journal-backup {
+  margin-bottom: 24px;
+}
+.journal-backup-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.journal-backup-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.journal-backup-status:not(:empty) {
+  margin-top: 12px;
+}
+.journal-backup-status a {
+  color: var(--gold-bright);
+}
+
+.journal-device-import {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 24px;
+  flex-wrap: wrap;
+}
+
+.journal-device-import p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.journal-device-import {
+  padding: 0 0 16px;
+}
+
+.journal-import-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  margin: 8px 0 24px;
+  overflow-wrap: anywhere;
+}
+
+.journal-import-details dt {
+  color: var(--muted);
+}
+
+.journal-import-details dd {
+  margin: 0;
+}

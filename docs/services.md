@@ -29,3 +29,7 @@ src/services/
 
 Keep each operation in the most specific domain that owns it. If a device dashboard starts showing
 groups, it can use the existing group query from `Devices/DeviceGroups/deviceGroups.api.js`.
+
+In Arcana Journal, account authentication and journal reads, writes, and subscriptions use
+Firebase. Keep those operations in their domain’s `.service.ts` file. Shared Firebase SDK loading
+and Firestore cache helpers live in `src/services/Firebase/`.

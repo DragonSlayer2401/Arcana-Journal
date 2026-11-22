@@ -12,6 +12,9 @@ Use this standard to decide whether code belongs to the project as a whole or to
   shared across independent domains belongs in `src/components/`.
 - Organize all product features under `src/features/` and all APIs and API helpers by domain under
   `src/services/`. Create each folder when it has a file to hold.
+- In the Next.js App Router, keep URL segments, route groups, layouts, and page metadata in
+  `src/app/`. Pages render feature assemblies. A layout can mount a feature-owned provider when
+  its state must survive navigation between sibling pages.
 
 ## Top-level folders
 

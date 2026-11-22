@@ -1,5 +1,7 @@
 import { redirect } from 'next/navigation';
 
-export default function UnknownPage() {
+const UnknownPage = () => {
   redirect('/');
-}
+};
+
+export default UnknownPage;

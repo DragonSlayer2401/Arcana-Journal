@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { Reading } from '../domain/types';
+import type { Reading } from '@/features/Journal/readingTypes';
 
 export const captureBackup = () => {
   const createObjectURL = vi.fn<(_blob: Blob) => string>().mockReturnValue('blob:journal-test');

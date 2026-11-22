@@ -40,6 +40,11 @@ suites share a helper, place it directly under `__tests__/helpers/`. For example
 `AlertCreator` and `AlertList` can use `WeatherAlerts/__tests__/helpers/buildTestAlert.js`.
 Create either folder only when it has a helper to hold.
 
+Arcana Journal uses `.test.ts(x)` for Vitest, `.spec.ts` for Playwright, and
+`.emulator.test.mjs` for feature UI scenarios that need Firebase. The cloud test entry point
+registers the feature scenarios so they share one emulator app. Browser tests that exercise the
+whole app, such as navigation between routes and service-worker updates, live in `tests/`.
+
 ## What to test
 
 - Start from a task the user can complete. Render the feature with the providers it needs and

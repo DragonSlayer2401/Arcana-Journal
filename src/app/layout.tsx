@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import '../styles.css';
-import '../components/AccountForm.css';
+import './globals.scss';
 
 export const metadata: Metadata = {
   title: { default: 'Arcana Journal · Tarot Readings', template: 'Arcana Journal · %s' },
@@ -21,7 +20,7 @@ export const viewport: Viewport = {
   themeColor: '#111222',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+const RootLayout = ({ children }: { children: ReactNode }) => {
   return (
     <html lang="en">
       <body>
@@ -33,4 +32,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </body>
     </html>
   );
-}
+};
+
+export default RootLayout;

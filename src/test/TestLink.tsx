@@ -4,14 +4,14 @@ import type Link from 'next/link';
 
 // Vitest does not run Next's navigation dispatcher. Exercise the real page components
 // and their session with links connected to each test's in-memory router.
-export default function TestLink({
+const TestLink = ({
   href,
   prefetch,
   onClick,
   onNavigate,
   children,
   ...props
-}: ComponentProps<typeof Link>) {
+}: ComponentProps<typeof Link>) => {
   const router = useRouter();
   return (
     <a
@@ -41,4 +41,6 @@ export default function TestLink({
       {children}
     </a>
   );
-}
+};
+
+export default TestLink;

@@ -1,8 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests',
-  testIgnore: 'update.spec.ts',
+  testDir: '.',
+  respectGitIgnore: true,
+  testMatch: ['tests/*.spec.ts', 'src/features/**/__tests__/**/*.spec.ts'],
+  testIgnore: 'ServiceWorkerUpdate.spec.ts',
   fullyParallel: true,
   workers: 3,
   timeout: 45_000,
