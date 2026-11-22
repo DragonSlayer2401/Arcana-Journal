@@ -50,7 +50,7 @@ for (const [suit, prefix] of [
 }
 
 const headers = {
-  'User-Agent': 'StilllightTarotReferenceCollector/1.0 (public-domain reference collection)',
+  'User-Agent': 'ArcanaJournalReferenceCollector/1.0 (public-domain reference collection)',
 };
 const get = async (url) => {
   for (let attempt = 0; attempt < 4; attempt++) {

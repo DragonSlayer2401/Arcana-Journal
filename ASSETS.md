@@ -14,8 +14,8 @@ The user-supplied style reference remains at `art/references/style-reference.png
 
 ## Original fallback artwork, icons, and meanings
 
-`src/components/CardArtwork.tsx` retains original symbolic SVG scenes as a defensive fallback if a local illustration cannot be decoded. Its celestial card back is also original. App icons are original bundled PNG/SVG files. Platform fonts are used; no font download is required.
+`src/features/Tarot/components/CardIllustrations.tsx` defines the original symbolic SVG card faces and celestial card back. If a bundled WebP fails to load, `src/features/Tarot/components/CardArtwork.tsx` displays the corresponding symbolic face. The app icons are original bundled PNG and SVG files. The interface uses platform fonts.
 
-The complete card dataset is `src/data/deck.ts`: 22 Major Arcana and 14 cards in each of Wands, Cups, Swords, and Pentacles. Strength is VIII and Justice is XI. All 156 upright and reversed summaries and keyword lists use original wording summarizing traditional tarot associations. They are fixed local data, and never influence random selection.
+The complete card dataset is `src/features/Tarot/data/deck.ts`: 22 Major Arcana and 14 cards in each of Wands, Cups, Swords, and Pentacles. Strength is VIII and Justice is XI. All 156 upright and reversed summaries and keyword lists use original wording summarizing traditional tarot associations. They are fixed local data, and never influence random selection.
 
 The project's source, original wording, icons, fallback artwork, and newly generated illustration files are provided under the MIT terms in `LICENSE`, to the extent copyright applies. The public-domain source compositions retain that status. The user's reference image is excluded. Third-party software retains its respective dependency licenses.

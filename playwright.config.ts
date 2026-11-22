@@ -1,8 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './tests',
-  testIgnore: 'update.spec.ts',
+  testDir: '.',
+  respectGitIgnore: true,
+  testMatch: ['tests/*.spec.ts', 'src/features/**/__tests__/**/*.spec.ts'],
+  testIgnore: 'ServiceWorkerUpdate.spec.ts',
   fullyParallel: true,
   workers: 3,
   timeout: 45_000,
@@ -14,7 +16,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run preview -- --port 4173 --strictPort',
+    command: 'npm run preview',
     url: 'http://127.0.0.1:4173',
     reuseExistingServer: true,
     timeout: 30_000,

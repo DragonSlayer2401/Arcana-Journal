@@ -1,23 +1,32 @@
 # Arcana Journal
 
-A tarot PWA built with React, TypeScript, and Vite. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
+Arcana Journal is a server-rendered Next.js tarot PWA built with React and TypeScript. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
 
-Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
+Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read its upright and reversed meanings. With JavaScript disabled, you can submit the filters and expand each card to read both meanings in the server-rendered page. The library also works offline once the app reports offline readiness.
 
-Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. The sign-in, signup, and password-reset forms also support direct links. Cloudflare serves the app at these paths using the [static asset rules](https://developers.cloudflare.com/workers/static-assets/redirects/#proxying) in `public/_redirects`. After offline setup, the service worker serves the cached pages. Account requests need a connection.
+Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
 
-Cloudflare serves the static build. Firebase Authentication handles optional email/password accounts, and Cloud Firestore stores each account's journal. Draws and card illustrations work on the device. The Firebase Spark plan covers these services within its free quotas.
+The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. Each page supplies its own title, description and public content. The initial HTML includes the reading form, the 78-card library, the journal loading state or the requested account form. After hydration, Firebase Authentication restores the browser session. Firestore loads when a verified account opens its journal. Draws and private readings stay on the device or in the signed-in account.
+
+## Project layout
+
+- `src/features/Tarot/` owns the deck and card artwork components. Its Reading and DeckCatalog features implement the draw and browse workflows.
+- `src/features/Journal/` owns the shared journal session, history, guest storage, account sync, and backup transfer.
+- `src/features/Account/` owns sign-in, signup, password reset, verification, and journal lock controls.
+- `src/app/` connects public URLs and page metadata to those features. Firebase adapters and account and journal operations live under `src/services/`.
+
+Feature styles live in the owning feature’s `assets/` folder. Feature tests live in `__tests__/` folders alongside the workflows they cover. The end-to-end checks that span the app live in `tests/`.
 
 ## Run it
 
-Install [Node.js](https://nodejs.org/) 22.12 or later (Node 24 LTS is suitable), then open a terminal in this folder:
+Install [Node.js](https://nodejs.org/) 24.12.0 or later, then run these commands from the project folder.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open the local address printed by Vite. A fresh checkout without a lockfile can use `npm install`; the delivered project includes a lockfile, so prefer `npm ci`.
+The development server opens at [127.0.0.1:3000](http://127.0.0.1:3000).
 
 ```sh
 npm run typecheck
@@ -27,7 +36,7 @@ npm run build
 npm run preview
 ```
 
-`npm run build` checks TypeScript and the full illustrated deck, creates `dist`, generates the versioned service worker, and verifies that all 78 images are included in its cache manifest. **Deploy the entire resulting `dist` folder.** Running `vite build` directly omits these checks and the service-worker generation step. `npm run dev` intentionally does not install a service worker; use the production preview to test offline behavior.
+`npm run build` validates the artwork, compiles the production app to `.next/`, captures the six public routes for offline use and writes the versioned worker to `public/sw.js`. The local production preview uses its own port so its service worker only controls that origin. Use `npm start` to run the production server on your host. [Open the local preview](http://127.0.0.1:4173).
 
 The generated worker also has a focused, dependency-free lifecycle harness:
 
@@ -35,7 +44,7 @@ The generated worker also has a focused, dependency-free lifecycle harness:
 node --test scripts/test-sw.mjs
 ```
 
-It checks complete-asset readiness, offline navigation, cache repair, rejected substituted content, version changes, and safe update activation. It builds temporary fixtures without changing the project's `dist` directory.
+It checks complete-asset readiness, offline navigation, cache repair, rejected substituted content, version changes, and safe update activation. The tests use temporary build fixtures.
 
 For browser automation:
 
@@ -49,7 +58,7 @@ Build first with `npm run build`. The browser suites start their own local produ
 
 ## Random selection
 
-`src/domain/random.ts` contains the selection code and does not import the UI or card meanings. Its only entropy source is `globalThis.crypto.getRandomValues()`. The optional question is journal text; it is never passed to the draw function.
+`src/features/Tarot/features/Reading/utils/random.ts` contains the selection code and does not import the UI or card meanings. Its only entropy source is `globalThis.crypto.getRandomValues()`. The optional question is journal text; it is never passed to the draw function.
 
 For each integer bound `n`, the implementation validates an integer in `[1, 2 ** 32]`, reads an unsigned 32-bit value, and calculates:
 
@@ -67,7 +76,7 @@ The accurate description is **cryptographically secure random draws with unbiase
 
 ## Data and artwork
 
-`src/data/deck.ts` includes all 22 Major Arcana and 56 Minor Arcana: Wands, Cups, Swords, and Pentacles, each Ace–Ten, Page, Knight, Queen, King. IDs are stable and unique. Meanings use original concise wording summarizing traditional associations, with distinct fixed upright and reversed entries.
+`src/features/Tarot/data/deck.ts` includes all 22 Major Arcana and 56 Minor Arcana: Wands, Cups, Swords, and Pentacles, each Ace–Ten, Page, Knight, Queen, King. IDs are stable and unique. Meanings use original concise wording summarizing traditional associations, with distinct fixed upright and reversed entries.
 
 All 78 card faces are bundled locally as 768 × 1152 WebP illustrations in `public/cards/`, keyed by the stable card IDs. They reinterpret the public-domain Rider–Waite–Smith scenes by Pamela Colman Smith in the user's supplied visual direction: angular forms, jewel tones, flowing patterns, and painted texture. They were created ahead of time with the built-in image-generation tool. There is no runtime image generation, interpretation service, API key, or extra fee to use these bundled images. Each card's complete portrait is visible; reversed artwork rotates while names and meanings stay upright. Original symbolic SVG artwork remains available as a defensive loading fallback.
 
@@ -113,7 +122,9 @@ When upgrading, let **Clear History** and queued changes finish in older tabs be
 
 ### Firebase setup for this deployment
 
-The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize `arcana-journal.jacobskip7.workers.dev` for email redirects, and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+
+Verification and password-reset emails return to `/journal` on the hostname that requested them. The production hostname `arcana-journal-theta.vercel.app` belongs in **Authentication → Settings → Authorized domains** in Firebase. If you test email actions on a Vercel preview, authorize that preview hostname too. [Firebase email action domains](https://firebase.google.com/docs/auth/web/passing-state-in-email-actions)
 
 Publish `firestore.rules` before releasing the frontend. The rules allow the optional, immutable `sourceId` used to restore readings whose legacy IDs collided. They also cover the account-specific document that coordinates imports with **Clear History**. Publish the rules in **Firestore → Rules**, or run the following command from this directory while signed in to the project.
 
@@ -121,46 +132,29 @@ Publish `firestore.rules` before releasing the frontend. The rules allow the opt
 firebase deploy --only firestore:rules --project arcana-journal
 ```
 
-The account and security-rule integration tests run against local emulators in a Chromium browser. With the Firebase CLI, Java 21, and the Playwright Chromium browser installed, run:
+The account and security-rule integration tests use the local Firebase emulators. Install the Firebase CLI, Java 21, and both Playwright browsers (`npx playwright install chromium webkit`), then run:
 
 ```sh
 firebase emulators:exec --only auth,firestore --project demo-arcana-journal "npm run test:cloud"
 ```
 
-Build with `npm run build` and publish `dist` to the existing Cloudflare Workers static-assets deployment at [Arcana Journal](https://arcana-journal.jacobskip7.workers.dev). The Pages instructions below apply to new Pages installations.
-
 ## Offline behavior and updates
 
-`scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
+`scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/utils/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
 
 After **Ready for offline use** appears, guests can draw, reveal, and revisit saved readings offline. Trusted-device accounts can use cached readings and sync changes after reconnecting. Asset caching needs one successful online load first, including a launch of the Home Screen app if it uses separate storage. Browsers can evict cached data.
 
-Navigation and built assets are served from the active worker's own versioned cache. Updates install in the background and wait for all old app tabs/windows to close. There is no automatic `skipWaiting`, forced reload, or draw on update. When the interface announces an available update, finish your reading, close every Arcana Journal Safari tab and the standalone app, then reopen. Persisted identities and orientations remain unchanged. A simple refresh may keep the old worker active; closing all clients allows the new one to activate.
+Online navigation uses the running Next.js server. When offline, the worker can restore a public page and its matching JavaScript, CSS and card assets from the active build. Updates install in the background and wait for all old app tabs/windows to close. There is no automatic `skipWaiting`, forced reload, or draw on update. When the interface announces an available update, finish your reading, close every Arcana Journal Safari tab and the standalone app, then reopen. Persisted identities and orientations remain unchanged. A simple refresh may keep the old worker active; closing all clients allows the new one to activate.
 
-HTTPS is required for the deployed PWA. Localhost is permitted for development. Opening `dist/index.html` as a file or serving an ordinary unencrypted LAN address is not a valid PWA test. These service-worker restrictions are documented by [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers).
+Service workers require HTTPS in production and also work on localhost. [Service worker requirements](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
 
-## Deploy free on Cloudflare Pages
+## Deploy on Vercel
 
-This is a static site with no Pages Functions. Cloudflare Pages' included `pages.dev` address supplies HTTPS; no domain purchase is needed. The project fits the [Pages Free plan's static asset limits](https://developers.cloudflare.com/pages/platform/limits/).
+Use the repository root as the Vercel project’s **Root Directory**. This branch’s `vercel.json` selects Next.js, runs `npm run build` to generate the SSR routes and offline assets, and uses the `.next` output directory. [Vercel project configuration](https://vercel.com/docs/project-configuration/vercel-json)
 
-1. In this project directory, run `npm ci` and `npm run build`.
-2. Sign in to a free [Cloudflare account](https://dash.cloudflare.com/) and open **Workers & Pages**.
-3. Create an application, select **Pages**, and choose **Direct Upload** / **Drag and drop your files**. Dashboard wording can vary; choose upload of prebuilt assets.
-4. For a new installation, give the project a name, for example `arcana-journal` (availability determines the final address). If updating an existing installation, keep its current Pages project and production address.
-5. Drag the **`dist` folder** into the upload area, or select it. Its root must contain `index.html`, `sw.js`, `manifest.webmanifest`, icons, `cards/`, and `assets/`. Do not upload the source project, `node_modules`, or an extra parent folder. The provided `release/ArcanaJournal-cloudflare.zip` contains this same ready-to-upload directory content.
-6. Choose **Deploy site** / **Save and Deploy** and wait for success. Open the supplied `https://<project-name>.pages.dev` address.
-7. Wait until the application reports **Ready for offline use**, then test a reading and a reload.
+If the site address changes, export guest readings from the old address and import the backup at the new one. Sign in to the same account to open readings already synced to Firebase.
 
-For updates, rebuild and use **Create a new deployment** in the same Pages project to upload the new `dist`. Keeping the same production address preserves the storage origin and access to existing history. This applies to the Arcana Journal rebrand too: update the existing project rather than creating or renaming its address just to match the new app name. Direct Upload projects cannot later switch to Git integration; automatic Git deployments require a new project. These steps follow [Cloudflare's Direct Upload guide](https://developers.cloudflare.com/pages/get-started/direct-upload/).
-
-Optional terminal deployment, using browser login rather than an application API key:
-
-```sh
-npx wrangler login
-npx wrangler pages deploy dist
-```
-
-The app itself does not need Wrangler, Cloudflare credentials, or any environment variables. No deployment has occurred merely by building this folder.
+To verify a deployment, open `/deck` directly, wait for **Ready for offline use**, then take the browser offline and reload. The deck should still show all 78 cards.
 
 ## Add to your iPhone Home Screen
 

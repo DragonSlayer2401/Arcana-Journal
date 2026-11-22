@@ -1,0 +1,98 @@
+.auth-page {
+  width: 100%;
+  max-width: 30rem;
+  margin: clamp(1.5rem, 6vw, 4rem) auto;
+  padding: clamp(1.25rem, 4vw, 2.25rem);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.auth-page h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(2.25rem, 5vw, 3rem);
+}
+
+.auth-description {
+  margin: 0 0 1.5rem;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.auth-form label {
+  font-size: 0.9375rem;
+}
+
+.auth-form label:not(:first-child) {
+  margin-top: 0.5rem;
+}
+
+.auth-form input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid #ffffff36;
+  border-radius: 8px;
+  background: #100f1c;
+  color: inherit;
+  font-size: 1rem;
+}
+
+.auth-form .notice {
+  margin: 0.5rem 0 0;
+}
+
+.auth-form [type='submit'] {
+  margin-top: 0.75rem;
+}
+.journal-account {
+  padding: 20px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.journal-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px 24px;
+  flex-wrap: wrap;
+}
+
+.journal-account h2 {
+  margin: 0;
+  font: 400 1.4rem/1.3 var(--serif);
+}
+
+.journal-account p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.journal-account p:empty {
+  display: none;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-verification {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.account-actions .text-button {
+  padding-inline: 4px;
+}

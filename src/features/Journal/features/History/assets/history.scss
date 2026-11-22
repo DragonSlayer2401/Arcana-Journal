@@ -1,0 +1,131 @@
+.journal {
+  padding: 55px 0 35px;
+}
+.journal-list {
+  display: grid;
+  gap: 15px;
+}
+.journal-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 23px;
+  background: linear-gradient(120deg, #211b2e99, #18162380);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+}
+.journal-date {
+  border-right: 1px solid #ffffff1c;
+  padding-right: 23px;
+  color: #c6ad80;
+  min-width: 62px;
+  text-align: center;
+}
+.journal-date span {
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.journal-date strong {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 2.25rem;
+  margin-top: 7px;
+  display: block;
+}
+.journal-open {
+  text-align: left;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+}
+.journal-meta {
+  font-size: 0.75rem;
+  color: #ab9db7;
+}
+.journal-open h2 {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.journal-cards {
+  display: block;
+  font-size: 0.8125rem;
+  line-height: 1.8;
+  color: #aaa0b8;
+}
+.journal-open-label {
+  color: var(--gold);
+  font-size: 0.8125rem;
+  margin-top: 14px;
+  display: block;
+}
+.delete-button {
+  margin: -10px -10px 0 0;
+}
+@media (max-width: 600px) {
+  .journal {
+    padding: 35px 0 30px;
+  }
+  .journal-entry {
+    padding: 19px 14px;
+    gap: 14px;
+  }
+  .journal-date {
+    min-width: 43px;
+    padding-right: 14px;
+  }
+  .journal-date span {
+    font-size: 0.625rem;
+  }
+  .journal-date strong {
+    font-size: 1.75rem;
+  }
+  .journal-meta {
+    font-size: 0.625rem;
+    line-height: 1.6;
+  }
+  .journal-open h2 {
+    font-size: 1.2rem;
+  }
+  .journal-cards {
+    font-size: 0.75rem;
+  }
+  .delete-button {
+    width: 32px;
+    min-width: 32px;
+    margin-right: -8px;
+  }
+}
+.journal-meta,
+.journal-date span {
+  font-size: 0.75rem;
+}
+.journal-cards,
+.journal-open-label {
+  font-size: 0.875rem;
+}
+.delete-button {
+  width: 44px;
+  min-width: 44px;
+}
+@media (max-width: 600px) {
+  .journal-meta {
+    font-size: 0.75rem;
+  }
+  .journal-entry {
+    gap: 11px;
+  }
+  .journal-open h2 {
+    font-size: 1.25rem;
+  }
+}
+@media (max-width: 360px) {
+  .journal-date {
+    display: none;
+  }
+}

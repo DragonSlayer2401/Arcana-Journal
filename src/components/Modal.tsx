@@ -1,16 +1,18 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import { Icon } from './Icons';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { Icon } from './Icon';
 
 export const Modal = ({
   title,
   onClose,
   children,
   className = '',
+  fallbackFocusRef,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  fallbackFocusRef?: RefObject<HTMLElement | null>;
 }) => {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -19,9 +21,10 @@ export const Modal = ({
     dialog?.showModal();
     return () => {
       dialog?.close();
-      previous?.focus();
+      if (previous?.isConnected) previous.focus();
+      else if (document.activeElement === document.body) fallbackFocusRef?.current?.focus();
     };
-  }, []);
+  }, [fallbackFocusRef]);
   return (
     <dialog
       ref={ref}

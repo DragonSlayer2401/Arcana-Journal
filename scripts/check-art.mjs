@@ -15,14 +15,14 @@ const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 // Read the actual stable IDs without depending on Node's optional TS loader.
 // deck.ts is a self-contained data module whose only import is a type import.
-const deckSource = await readFile(resolve(project, 'src/data/deck.ts'), 'utf8');
+const deckSource = await readFile(resolve(project, 'src/features/Tarot/data/deck.ts'), 'utf8');
 const { outputText } = ts.transpileModule(deckSource, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 });
-const { DECK } = await import(
+const { tarotDeck } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 );
-if (DECK.length !== 78 || new Set(DECK.map((card) => card.id)).size !== 78) {
+if (tarotDeck.length !== 78 || new Set(tarotDeck.map((card) => card.id)).size !== 78) {
   throw new Error('The source deck must contain exactly 78 unique card IDs.');
 }
 
@@ -80,7 +80,7 @@ const webpSize = (bytes) => {
 
 const errors = [];
 const warnings = [];
-const expected = new Set(DECK.map((card) => `${card.id}.webp`));
+const expected = new Set(tarotDeck.map((card) => `${card.id}.webp`));
 const directory = resolve(project, 'public/cards');
 const present = await readdir(directory).catch(() => []);
 for (const name of present) {
@@ -91,7 +91,11 @@ for (const name of present) {
 }
 let cachedAssets;
 if (checkBuiltAssets) {
-  const worker = await readFile(resolve(project, 'dist/sw.js'), 'utf8');
+  const worker = await readFile(resolve(project, 'public/sw.js'), 'utf8');
+  const buildId = (await readFile(resolve(project, '.next/BUILD_ID'), 'utf8')).trim();
+  if (!worker.includes(`const BUILD_ID = ${JSON.stringify(buildId)};`)) {
+    throw new Error('The service worker does not match the current Next.js production build.');
+  }
   const manifest = /const ASSETS = (\[[\s\S]*?\]);/.exec(worker)?.[1];
   if (!manifest)
     throw new Error(
@@ -102,7 +106,7 @@ if (checkBuiltAssets) {
 const hashes = new Map();
 const sizes = [];
 const resolutions = new Set();
-for (const card of DECK) {
+for (const card of tarotDeck) {
   const name = `${card.id}.webp`;
   try {
     const bytes = await readFile(resolve(directory, name));
@@ -124,9 +128,6 @@ for (const card of DECK) {
         `${name}: ${(bytes.length / 1024).toFixed(0)} KiB; consider optimizing for the first offline download.`,
       );
     if (checkBuiltAssets) {
-      const builtHash = digest(await readFile(resolve(project, 'dist/cards', name)));
-      if (builtHash !== hash)
-        errors.push(`${name}: dist is not the same illustration as public/cards. Rebuild.`);
       if (cachedAssets.get(`/cards/${name}`) !== hash)
         errors.push(`${name}: missing or stale in the required offline cache manifest.`);
     }
@@ -152,7 +153,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `All 78 illustrations passed structural checks${checkBuiltAssets ? ', built-byte checks, and required offline-cache coverage' : ''}.`,
+    `All 78 illustrations passed structural checks${checkBuiltAssets ? ' and required offline-cache coverage' : ''}.`,
   );
   console.log(
     'Browser decoding and visual review are still required; headers do not prove image content or composition.',
