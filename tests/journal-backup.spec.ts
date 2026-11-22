@@ -229,7 +229,7 @@ test('a rejected file leaves the journal intact and a corrected file merges with
       { ...imported, createdAt: '2021-03-14T07:30:00.000Z' },
     ]),
   );
-  await page.getByRole('link', { name: 'Reading', exact: true }).click();
+  await page.goBack();
   await expect(page.getByText(existing.readings[0].question, { exact: true })).toBeVisible();
   await page.getByRole('link', { name: /^Journal/ }).click();
   await page.getByRole('button', { name: 'Delete reading: What was on my mind then?' }).click();

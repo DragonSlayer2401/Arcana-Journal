@@ -619,7 +619,7 @@ test(
       'A journal to bring along',
       'While waiting for my verification email',
     ]);
-    await first.getByRole('link', { name: 'Reading', exact: true }).click();
+    await first.goBack();
     await first.evaluate(() => {
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
