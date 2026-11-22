@@ -1,5 +1,11 @@
 # Verification record
 
+## Server rendering review, November 22, 2026
+
+All six App Router pages returned HTTP 200 with their route-specific title, description and primary heading when JavaScript was disabled. The initial HTML included all 78 deck entries, the reading and account forms, and an anonymous loading state for the journal. The server bundle excludes Firebase Auth and Firestore. The browser loads Firestore when a verified account opens its journal.
+
+TypeScript and the production build passed. The build included 137 required offline assets. All 214 unit tests, 11 service-worker tests, 90 browser tests, the deployment-update test and 81 Firebase emulator integration tests passed.
+
 ## Vercel build, November 22, 2026
 
 A local Linux build using Vercel’s Next.js adapter produced six SSR functions. Each served HTML and a React Server Component response for its route. All 129 entries in the service worker’s cache manifest matched the packaged files by SHA-256, including all 78 card illustrations and both offline responses for each route.

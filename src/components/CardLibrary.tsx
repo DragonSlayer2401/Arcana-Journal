@@ -1,4 +1,7 @@
+'use client';
+
 import { useState } from 'react';
+import { useJournalSession } from '../JournalProvider';
 import { DECK } from '../data/deck';
 import type { TarotCard } from '../domain/types';
 import { CardArtwork } from './CardArtwork';
@@ -7,7 +10,8 @@ import { Modal } from './Modal';
 const collections = ['Major Arcana', 'Wands', 'Cups', 'Swords', 'Pentacles'] as const;
 const collectionOf = (card: TarotCard) => card.suit ?? 'Major Arcana';
 
-export const CardLibrary = ({ opening = false }: { opening?: boolean }) => {
+export const CardLibrary = () => {
+  const { opening } = useJournalSession();
   const [search, setSearch] = useState('');
   const [collection, setCollection] = useState('All cards');
   const [selected, setSelected] = useState<TarotCard | null>(null);
@@ -19,11 +23,7 @@ export const CardLibrary = ({ opening = false }: { opening?: boolean }) => {
   );
 
   return (
-    <section className="card-library" aria-labelledby="library-title">
-      <header className="library-intro">
-        <h1 id="library-title">Card library</h1>
-        <p>Choose a card to explore its upright and reversed meanings.</p>
-      </header>
+    <>
       <div className="library-controls">
         <label>
           Search cards
@@ -108,6 +108,6 @@ export const CardLibrary = ({ opening = false }: { opening?: boolean }) => {
           </div>
         </Modal>
       )}
-    </section>
+    </>
   );
 };

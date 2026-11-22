@@ -1,25 +1,5 @@
-import {
-  arrayUnion,
-  collection,
-  doc,
-  documentId,
-  getDocFromCache,
-  getDocFromServer,
-  getDocsFromServer,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  setDoc,
-  snapshotEqual,
-  startAfter,
-  updateDoc,
-  where,
-  waitForPendingWrites,
-  type DocumentSnapshot,
-  type Firestore,
-} from 'firebase/firestore';
+import type { DocumentSnapshot, Firestore } from 'firebase/firestore';
+import { firestoreSdk } from './firebaseSdk';
 import {
   assignReadingId,
   createJournalBackup,
@@ -79,9 +59,9 @@ export {
 } from './account';
 
 const readingsFor = (database: Firestore, uid: string) =>
-  collection(database, 'users', uid, 'readings');
+  firestoreSdk().collection(database, 'users', uid, 'readings');
 const clearFor = (database: Firestore, uid: string) =>
-  doc(database, 'users', uid, 'journalOperations', 'clear');
+  firestoreSdk().doc(database, 'users', uid, 'journalOperations', 'clear');
 
 // Portable IDs may contain slashes or exceed Firestore's path segment limit.
 // Retain the exact ID inside the document and use a fixed-size key for lookups.
@@ -91,7 +71,7 @@ const readingRef = async (database: Firestore, uid: string, id: string) => {
   const key = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
     '',
   );
-  return doc(readingsFor(database, uid), key);
+  return firestoreSdk().doc(readingsFor(database, uid), key);
 };
 
 const revealedSlots = (reading: Reading) =>
@@ -163,8 +143,8 @@ export const lookupRecoveryReading = async (uid: string, id: string) => {
   const reference = await readingRef(await databaseFor(uid), uid, id);
   requireVerifiedAccount(uid);
   const snapshot = navigator.onLine
-    ? await getDocFromServer(reference)
-    : await getDocFromCache(reference);
+    ? await firestoreSdk().getDocFromServer(reference)
+    : await firestoreSdk().getDocFromCache(reference);
   requireVerifiedAccount(uid);
   if (snapshot.metadata.hasPendingWrites || (!snapshot.exists() && snapshot.metadata.fromCache)) {
     throw new Error(
@@ -235,12 +215,13 @@ export const observeReadings = (
   listen(
     uid,
     (database, active) => {
-      const recent = query(
+      const firestore = firestoreSdk();
+      const recent = firestore.query(
         readingsFor(database, uid),
-        orderBy('createdAtMs', 'desc'),
-        limit(count + 1),
+        firestore.orderBy('createdAtMs', 'desc'),
+        firestore.limit(count + 1),
       );
-      return onSnapshot(
+      return firestore.onSnapshot(
         recent,
         { includeMetadataChanges: true },
         (snapshot) => {
@@ -273,7 +254,7 @@ export const observeReading = (
     uid,
     async (database, active) => {
       const reference = await readingRef(database, uid, id);
-      return onSnapshot(
+      return firestoreSdk().onSnapshot(
         reference,
         { includeMetadataChanges: true },
         (snapshot) => {
@@ -327,15 +308,17 @@ const withReading = (
 };
 
 export const createReading = (uid: string, reading: Reading) =>
-  withReading(uid, reading.id, (reference) => setDoc(reference, encodeReading(reading)));
+  withReading(uid, reading.id, (reference) =>
+    firestoreSdk().setDoc(reference, encodeReading(reading)),
+  );
 
 export const revealCards = (uid: string, reading: Reading, indexes: number[]) =>
   withReading(uid, reading.id, (reference) =>
     // Firestore rules allow only revealedSlots to change. Including the original
     // identity makes the server reject a queued update if this ID was reused.
-    updateDoc(reference, {
+    firestoreSdk().updateDoc(reference, {
       ...readingIdentityFields(reading),
-      revealedSlots: arrayUnion(...indexes),
+      revealedSlots: firestoreSdk().arrayUnion(...indexes),
     }),
   );
 
@@ -360,11 +343,12 @@ const deletionClient = (uid: string, trusted: boolean) => {
       await dispatches.get(uid);
       requireSession();
       const database = await databaseFor(uid);
-      await waitForPendingWrites(database);
+      const firestore = firestoreSdk();
+      await firestore.waitForPendingWrites(database);
       const reference = await readingRef(database, uid, reading.id);
       // A lost commit response can mean the deletion already happened. Let
       // the queue retry in verification mode before touching this document again.
-      await runTransaction(
+      await firestore.runTransaction(
         database,
         async (transaction) => {
           requireSession();
@@ -413,7 +397,7 @@ export const readDeletionTarget = async (uid: string, id: string) => {
   const reference = await readingRef(database, uid, id);
   // A locally deleted row can disappear from a query without that query
   // reporting pending writes. Transaction reads always check the server.
-  return runTransaction(database, async (transaction) => {
+  return firestoreSdk().runTransaction(database, async (transaction) => {
     requireVerifiedAccount(uid);
     const current = await transaction.get(reference);
     requireVerifiedAccount(uid);
@@ -432,9 +416,15 @@ const onlineDatabase = async (uid: string) => {
 };
 const readPage = async (database: Firestore, uid: string, cursor: string | null) => {
   requireVerifiedAccount(uid);
-  const source = query(readingsFor(database, uid), orderBy(documentId()));
-  const page = await getDocsFromServer(
-    cursor ? query(source, startAfter(cursor), limit(pageSize)) : query(source, limit(pageSize)),
+  const firestore = firestoreSdk();
+  const source = firestore.query(
+    readingsFor(database, uid),
+    firestore.orderBy(firestore.documentId()),
+  );
+  const page = await firestore.getDocsFromServer(
+    cursor
+      ? firestore.query(source, firestore.startAfter(cursor), firestore.limit(pageSize))
+      : firestore.query(source, firestore.limit(pageSize)),
   );
   requireVerifiedAccount(uid);
   if (page.metadata.hasPendingWrites)
@@ -454,9 +444,10 @@ export const exportAccountJournal = async (
   const trusted = isOfflineJournalEnabled(uid);
   await checkDeletionsForExport(uid, trusted, allowUncheckedDeletions);
   const database = await onlineDatabase(uid);
+  const firestore = firestoreSdk();
   const checkedRevision = async () => {
     if (allowUncheckedDeletions) return;
-    const clear = await getDocFromServer(clearFor(database, uid));
+    const clear = await firestore.getDocFromServer(clearFor(database, uid));
     requireVerifiedAccount(uid);
     if (clear.get('active') === true)
       throw new UncheckedDeletionsExportError(
@@ -493,10 +484,10 @@ export const exportAccountJournal = async (
     if (allowUncheckedDeletions) {
       // An explicitly partial export can still be downloaded if the control
       // cannot be read. Its reusable link expires on the first server check.
-      revision = await getDocFromServer(control).then(clearRevision, () => undefined);
+      revision = await firestore.getDocFromServer(control).then(clearRevision, () => undefined);
     }
     receiveWatcher((invalidate) =>
-      onSnapshot(
+      firestore.onSnapshot(
         control,
         { includeMetadataChanges: true },
         (next) => {
@@ -535,7 +526,7 @@ export const reviewAccountClear = async (uid: string): Promise<AccountClearRevie
       // A query can include SDK bookkeeping from a recently acknowledged write.
       // Capture the server versions through the same transaction API used by
       // deletion, so that bookkeeping cannot hide an otherwise unchanged draw.
-      const reviewed = await runTransaction(database, (transaction) =>
+      const reviewed = await firestoreSdk().runTransaction(database, (transaction) =>
         Promise.all(page.docs.map((entry) => transaction.get(entry.ref))),
       );
       requireVerifiedAccount(uid);
@@ -578,25 +569,29 @@ const submitClear = async (
   for (let offset = 0; ; offset += pageSize) {
     const page = review.documents.slice(offset, offset + pageSize);
     const lastPage = offset + page.length >= review.documents.length;
-    await runTransaction(
-      database,
-      async (transaction) => {
-        requireVerifiedAccount(uid);
-        const active = await transaction.get(control);
-        if (active.get('token') !== token || active.get('active') !== true)
-          throw new Error(clearChanged);
-        const current = await Promise.all(page.map((entry) => transaction.get(entry.ref)));
-        requireVerifiedAccount(uid);
-        // Snapshot equality checks the document version as well as its content.
-        // This also protects a deleted and identically recreated reading.
-        const unchanged = current.filter((entry, index) => snapshotEqual(entry, page[index]));
-        for (const entry of unchanged) transaction.delete(entry.ref);
-        if (lastPage) transaction.set(control, { token, active: false });
-        // From here the server may commit this page even if its response is lost.
-        if (unchanged.length) onPageSubmitted?.();
-      },
-      { maxAttempts: 1 },
-    ).catch(reportClearConflict);
+    await firestoreSdk()
+      .runTransaction(
+        database,
+        async (transaction) => {
+          requireVerifiedAccount(uid);
+          const active = await transaction.get(control);
+          if (active.get('token') !== token || active.get('active') !== true)
+            throw new Error(clearChanged);
+          const current = await Promise.all(page.map((entry) => transaction.get(entry.ref)));
+          requireVerifiedAccount(uid);
+          // Snapshot equality checks the document version as well as its content.
+          // This also protects a deleted and identically recreated reading.
+          const unchanged = current.filter((entry, index) =>
+            firestoreSdk().snapshotEqual(entry, page[index]),
+          );
+          for (const entry of unchanged) transaction.delete(entry.ref);
+          if (lastPage) transaction.set(control, { token, active: false });
+          // From here the server may commit this page even if its response is lost.
+          if (unchanged.length) onPageSubmitted?.();
+        },
+        { maxAttempts: 1 },
+      )
+      .catch(reportClearConflict);
     if (lastPage) return;
   }
 };
@@ -626,15 +621,17 @@ export const withClearPreparation = (
       try {
         database = await onlineDatabase(uid);
         const control = clearFor(database, uid);
-        await runTransaction(
-          database,
-          async (transaction) => {
-            await transaction.get(control);
-            requireVerifiedAccount(uid);
-            transaction.set(control, { token, active: true });
-          },
-          { maxAttempts: 1 },
-        ).catch(reportClearConflict);
+        await firestoreSdk()
+          .runTransaction(
+            database,
+            async (transaction) => {
+              await transaction.get(control);
+              requireVerifiedAccount(uid);
+              transaction.set(control, { token, active: true });
+            },
+            { maxAttempts: 1 },
+          )
+          .catch(reportClearConflict);
       } finally {
         release();
       }
@@ -648,7 +645,7 @@ export const withClearPreparation = (
         try {
           requireVerifiedAccount(uid);
           const control = clearFor(database, uid);
-          await runTransaction(
+          await firestoreSdk().runTransaction(
             database,
             async (transaction) => {
               const current = await transaction.get(control);
@@ -685,8 +682,12 @@ const importChange = (existing: Reading | undefined, incoming: Reading) => {
 type ImportProgress = (completed: number, total: number) => void;
 export const lookupRecoveryImportTarget = async (uid: string, source: Reading) => {
   const database = await onlineDatabase(uid);
-  const snapshot = await getDocsFromServer(
-    query(readingsFor(database, uid), where('createdAtMs', '==', readingEpoch(source.createdAt))),
+  const firestore = firestoreSdk();
+  const snapshot = await firestore.getDocsFromServer(
+    firestore.query(
+      readingsFor(database, uid),
+      firestore.where('createdAtMs', '==', readingEpoch(source.createdAt)),
+    ),
   );
   requireVerifiedAccount(uid);
   return findImportTarget(
@@ -717,6 +718,7 @@ const accountImportResolver = (
   const incomingById = new Map(incoming.map((reading) => [reading.id, reading]));
   const candidates = new Map<number, Promise<Reading[]>>();
   const trusted = isOfflineJournalEnabled(uid);
+  const firestore = firestoreSdk();
   const client = deletionClient(uid, trusted);
   return async (source: Reading, lookup: (id: string) => Promise<Reading | undefined>) => {
     await checkClearRegistration(uid, onUnchecked);
@@ -744,9 +746,14 @@ const accountImportResolver = (
       const matchingDates = dates.slice(group * 30, (group + 1) * 30);
       candidates.set(
         group,
-        getDocsFromServer(
-          query(readingsFor(database, uid), where('createdAtMs', 'in', matchingDates)),
-        ).then((snapshot) => snapshot.docs.map(decodeReading)),
+        firestoreSdk()
+          .getDocsFromServer(
+            firestore.query(
+              readingsFor(database, uid),
+              firestore.where('createdAtMs', 'in', matchingDates),
+            ),
+          )
+          .then((snapshot) => snapshot.docs.map(decodeReading)),
       );
     }
     const matches = await candidates.get(group)!;
@@ -778,7 +785,7 @@ export const previewAccountImport = async (
     requireVerifiedAccount(uid);
     const { id, existing } = await resolve(incoming, async (id) => {
       if (!known.has(id)) {
-        const snapshot = await getDocFromServer(await readingRef(database, uid, id));
+        const snapshot = await firestoreSdk().getDocFromServer(await readingRef(database, uid, id));
         known.set(id, snapshot.exists() ? decodeReading(snapshot) : undefined);
       }
       return known.get(id);
@@ -819,7 +826,7 @@ export const importAccountReadings = (
       });
       for (const incoming of readings) {
         const recordTarget = importTargetRecorder(copies, incoming, retainedCopies !== undefined);
-        const change = await runTransaction(database, async (transaction) => {
+        const change = await firestoreSdk().runTransaction(database, async (transaction) => {
           requireVerifiedAccount(uid);
           const lookup = async (id: string) => {
             const snapshot = await transaction.get(await readingRef(database, uid, id));
@@ -844,7 +851,7 @@ export const importAccountReadings = (
             transaction.set(reference, encodeReading(assignReadingId(incoming, id)));
           if (action === 'updated')
             transaction.update(reference, {
-              revealedSlots: arrayUnion(...revealedSlots(incoming)),
+              revealedSlots: firestoreSdk().arrayUnion(...revealedSlots(incoming)),
             });
           return action;
         });

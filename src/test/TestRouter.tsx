@@ -5,7 +5,7 @@ import {
   type AppRouterInstance,
 } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { PathnameContext } from 'next/dist/shared/lib/hooks-client-context.shared-runtime';
-import App from '../App';
+import JournalShell from '../app/(journal)/JournalShell';
 import Reading from '../app/(journal)/page';
 import Deck from '../app/(journal)/deck/page';
 import Journal from '../app/(journal)/journal/page';
@@ -24,9 +24,9 @@ const pages = new Map([
 export const TestApp = () => {
   const Page = pages.get(usePathname())!;
   return (
-    <App>
+    <JournalShell>
       <Page />
-    </App>
+    </JournalShell>
   );
 };
 

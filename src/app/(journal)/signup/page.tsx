@@ -1,5 +1,20 @@
+import type { Metadata } from 'next';
 import { AccountForm } from '../../../components/AccountForm';
 
+export const metadata: Metadata = {
+  title: 'Create account',
+  description:
+    'Create an Arcana Journal account and verify your email to sync tarot readings across your devices.',
+};
+
 export default function Page() {
-  return <AccountForm mode="signUp" />;
+  return (
+    <AccountForm
+      mode="signUp"
+      heading={<h1 id="auth-title">Create account</h1>}
+      description={
+        <p className="auth-description">Verify your email to sync readings across your devices.</p>
+      }
+    />
+  );
 }

@@ -1,39 +1,7 @@
-import { initializeApp, deleteApp, type FirebaseApp } from 'firebase/app';
-import {
-  beforeAuthStateChanged,
-  browserLocalPersistence,
-  browserSessionPersistence,
-  connectAuthEmulator,
-  createUserWithEmailAndPassword,
-  EmailAuthProvider,
-  initializeAuth,
-  inMemoryPersistence,
-  onAuthStateChanged,
-  onIdTokenChanged,
-  reauthenticateWithCredential,
-  reload,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  setPersistence,
-  signInWithCredential,
-  signInWithEmailAndPassword,
-  signOut,
-  updateCurrentUser,
-  type Auth,
-  type Persistence,
-  type User,
-} from 'firebase/auth';
-import {
-  connectFirestoreEmulator,
-  initializeFirestore,
-  memoryLocalCache,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  terminate,
-  waitForPendingWrites,
-  type Firestore,
-} from 'firebase/firestore';
-
+import type { FirebaseApp } from 'firebase/app';
+import type { Auth, Persistence, User } from 'firebase/auth';
+import type { Firestore } from 'firebase/firestore';
+import { browserAuthSdk, firestoreSdk, loadFirestoreSdk } from './firebaseSdk';
 import { signOutWithoutPendingEdits } from './journalActivity';
 import { hasPendingDeletion } from './deletionQueue';
 import { requestStore } from './deletionStore';
@@ -290,15 +258,15 @@ const ownerCheckedProvider = (
 let browserAuth: Auth | undefined;
 const getBrowserAuth = (): Auth => {
   if (browserAuth) return browserAuth;
-  if (typeof window === 'undefined') throw new Error('Journal accounts require a browser.');
-  const localLogin = ownerCheckedProvider(browserLocalPersistence, () => localStorage, true);
-  const sessionLogin = ownerCheckedProvider(browserSessionPersistence, () => sessionStorage);
-  const auth = initializeAuth(initializeApp(config), {
-    persistence: [localLogin, sessionLogin, inMemoryPersistence],
+  const sdk = browserAuthSdk();
+  const localLogin = ownerCheckedProvider(sdk.browserLocalPersistence, () => localStorage, true);
+  const sessionLogin = ownerCheckedProvider(sdk.browserSessionPersistence, () => sessionStorage);
+  const auth = sdk.initializeAuth(sdk.initializeApp(config), {
+    persistence: [localLogin, sessionLogin, sdk.inMemoryPersistence],
   });
   // Firebase skips this hook for storage notifications. Bind a new generation
   // only to the user authenticated by this tab's own credential request.
-  beforeAuthStateChanged(auth, async (user) => {
+  sdk.beforeAuthStateChanged(auth, async (user) => {
     if (newLogin && user?.email?.toLowerCase() === newLogin.email) {
       newLogin.user = user;
       // A failed password must never change the previous session's trust. This
@@ -307,7 +275,7 @@ const getBrowserAuth = (): Auth => {
       const previous = manager.persistence;
       movingLogin = { owner: newLogin.previous, toShared: newLogin.trusted };
       try {
-        await setPersistence(auth, newLogin.trusted ? localLogin : sessionLogin);
+        await sdk.setPersistence(auth, newLogin.trusted ? localLogin : sessionLogin);
       } finally {
         movingLogin = undefined;
         // setPersistence changes the SDK's store but leaves its storage listener
@@ -326,15 +294,17 @@ const getBrowserAuth = (): Auth => {
   void auth.authStateReady().then(() => {
     restoringAuth = false;
   });
-  if (useEmulators) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  if (useEmulators)
+    sdk.connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   browserAuth = auth;
   return auth;
 };
 
 const memoryAuthFor = (app: FirebaseApp) => {
-  const instance = initializeAuth(app, { persistence: inMemoryPersistence });
+  const sdk = browserAuthSdk();
+  const instance = sdk.initializeAuth(app, { persistence: sdk.inMemoryPersistence });
   if (useEmulators)
-    connectAuthEmulator(instance, 'http://127.0.0.1:9099', { disableWarnings: true });
+    sdk.connectAuthEmulator(instance, 'http://127.0.0.1:9099', { disableWarnings: true });
   return instance;
 };
 
@@ -492,7 +462,7 @@ export const observeJournalLock = (uid: string, onChange: () => void): (() => vo
   const auth = getBrowserAuth();
   // The displayed journal may still belong to the previous user while the new
   // user's ID token is being verified. Invalidate its view immediately.
-  const stopAccount = onAuthStateChanged(auth, onChange);
+  const stopAccount = browserAuthSdk().onAuthStateChanged(auth, onChange);
   const onStorage = (event: StorageEvent) => {
     const user = auth.currentUser;
     if ((event.key === lockKey(uid) || event.key === null) && user?.uid === uid) {
@@ -578,9 +548,10 @@ const journalCredentials = (owner: User): User => {
 const verifyOwnerPassword = async (owner: User, email: string, password: string) => {
   const previousToken = owner.refreshToken;
   const previousAccess = cachedToken(owner);
-  const credential = EmailAuthProvider.credential(email, password);
+  const sdk = browserAuthSdk();
+  const credential = sdk.EmailAuthProvider.credential(email, password);
   try {
-    await reauthenticateWithCredential(owner, credential);
+    await sdk.reauthenticateWithCredential(owner, credential);
     tabCredentials.delete(owner);
     return 'shared';
   } catch (error) {
@@ -591,8 +562,8 @@ const verifyOwnerPassword = async (owner: User, email: string, password: string)
       error.code !== 'auth/internal-error'
     )
       throw error;
-    passwordVerifier ??= memoryAuthFor(initializeApp(config, 'journal-password-check'));
-    const { user: verified } = await signInWithCredential(passwordVerifier, credential);
+    passwordVerifier ??= memoryAuthFor(sdk.initializeApp(config, 'journal-password-check'));
+    const { user: verified } = await sdk.signInWithCredential(passwordVerifier, credential);
     try {
       if (verified.uid !== owner.uid || requireAccount(owner.uid) !== owner)
         throw new Error('The journal account has changed. Please retry.');
@@ -606,7 +577,7 @@ const verifyOwnerPassword = async (owner: User, email: string, password: string)
       });
       return 'tab';
     } finally {
-      await signOut(passwordVerifier);
+      await sdk.signOut(passwordVerifier);
     }
   }
 };
@@ -758,20 +729,23 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
   const opened = closing.then(async () => {
     await verifyJournalToken(user);
     requireVerifiedAccount(uid);
-    const journalApp = initializeApp(config, name);
+    const firestore = await loadFirestoreSdk();
+    const sdk = browserAuthSdk();
+    requireVerifiedAccount(uid);
+    const journalApp = sdk.initializeApp(config, name);
     try {
       const journalAuth = memoryAuthFor(journalApp);
       // Both Firebase apps use the same API key and project. Copy the restored
       // SDK user into this cache's in-memory Auth instance, including on offline reload.
       const credentials = journalCredentials(user);
-      await updateCurrentUser(journalAuth, credentials);
+      await sdk.updateCurrentUser(journalAuth, credentials);
       requireVerifiedAccount(uid);
-      const database = initializeFirestore(journalApp, {
+      const database = firestore.initializeFirestore(journalApp, {
         localCache: trusted
-          ? persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-          : memoryLocalCache(),
+          ? firestore.persistentLocalCache({ tabManager: firestore.persistentMultipleTabManager() })
+          : firestore.memoryLocalCache(),
       });
-      if (useEmulators) connectFirestoreEmulator(database, '127.0.0.1', 8080);
+      if (useEmulators) firestore.connectFirestoreEmulator(database, '127.0.0.1', 8080);
       // The named Auth instance holds its own copy of the owner's credentials. In
       // particular, a password reset invalidates that copy's earlier refresh token.
       let copiedToken: string | undefined = credentials.refreshToken;
@@ -780,14 +754,14 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
         const credentials = journalCredentials(owner);
         if (force || copiedToken !== credentials.refreshToken) {
           copiedToken = credentials.refreshToken;
-          credentialsReady = updateCurrentUser(journalAuth, credentials).catch((error) => {
+          credentialsReady = sdk.updateCurrentUser(journalAuth, credentials).catch((error) => {
             copiedToken = undefined;
             throw error;
           });
         }
         return credentialsReady;
       };
-      const stopCredentials = onIdTokenChanged(auth, (owner) => {
+      const stopCredentials = sdk.onIdTokenChanged(auth, (owner) => {
         if (owner?.uid === uid && owner.emailVerified && owner === auth.currentUser) {
           // Includes same-UID reauthentication from a sibling tab. A failed copy
           // will be retried on the next journal access.
@@ -796,7 +770,7 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
       });
       return { database, journalApp, refreshUser, stopCredentials };
     } catch (error) {
-      await deleteApp(journalApp);
+      await sdk.deleteApp(journalApp);
       throw error;
     }
   });
@@ -814,9 +788,9 @@ export const databaseFor = (uid: string): Promise<Firestore> => {
       const { database, journalApp, stopCredentials } = await opened;
       stopCredentials();
       try {
-        await terminate(database);
+        await firestoreSdk().terminate(database);
       } finally {
-        await deleteApp(journalApp);
+        await browserAuthSdk().deleteApp(journalApp);
       }
     },
   };
@@ -926,7 +900,7 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
     onUser(account);
   };
   refreshListeners.add(publish);
-  const unsubscribe = onIdTokenChanged(auth, async () => {
+  const unsubscribe = browserAuthSdk().onIdTokenChanged(auth, async () => {
     const version = ++revision;
     await settling;
     if (!active || version !== revision) return;
@@ -975,7 +949,7 @@ export const observeAccount = (onUser: (user: JournalUser | null) => void): (() 
         // A fresh locked tab has no reading listeners. Starting this owner's
         // Firestore client resumes its persisted writes without displaying data.
         void databaseFor(account.uid)
-          .then(waitForPendingWrites)
+          .then((database) => firestoreSdk().waitForPendingWrites(database))
           .catch(() => {
             // An account switch may stop the client. Unsynced copies stay with the owner.
           });
@@ -1087,8 +1061,8 @@ const authenticate = (email: string, password: string, trusted: boolean, registe
         trusted,
       };
       const credential = register
-        ? await createUserWithEmailAndPassword(auth, email.trim(), password)
-        : await signInWithEmailAndPassword(auth, email.trim(), password);
+        ? await browserAuthSdk().createUserWithEmailAndPassword(auth, email.trim(), password)
+        : await browserAuthSdk().signInWithEmailAndPassword(auth, email.trim(), password);
       explicitTrust.set(credential.user, trusted);
       if (trusted) reserveFirstLock(credential.user.uid);
       else if (!register) await removeOfflineJournal(credential.user.uid);
@@ -1115,13 +1089,13 @@ export const signUp = async (email: string, password: string, trusted = false) =
 export const sendVerification = async () => {
   const auth = getBrowserAuth();
   if (!auth.currentUser) throw new Error('Sign in to verify your email.');
-  await sendEmailVerification(auth.currentUser, returnToJournal());
+  await browserAuthSdk().sendEmailVerification(auth.currentUser, returnToJournal());
 };
 export const refreshAccount = async () => {
   const auth = getBrowserAuth();
   const user = auth.currentUser;
   if (user) {
-    await reload(user);
+    await browserAuthSdk().reload(user);
     if (auth.currentUser !== user)
       throw new Error('The journal account has changed. Please retry.');
     if (user.emailVerified) {
@@ -1136,7 +1110,7 @@ export const refreshAccount = async () => {
   return notifyCheckedAccount(user);
 };
 export const resetPassword = (email: string) =>
-  sendPasswordResetEmail(getBrowserAuth(), email.trim(), returnToJournal());
+  browserAuthSdk().sendPasswordResetEmail(getBrowserAuth(), email.trim(), returnToJournal());
 
 export const resetLockedJournalPassword = (uid: string) => {
   const owner = requireAccount(uid);
@@ -1148,7 +1122,7 @@ export const settledWrites = async (database: Firestore) => {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      waitForPendingWrites(database),
+      firestoreSdk().waitForPendingWrites(database),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(
           () =>
@@ -1212,7 +1186,7 @@ export const signOutAccount = async (displayedUid?: string) => {
       if (!user || (user.uid === uid && (!interrupted || sameLogin(currentLogin(user), owner)))) {
         signingOutOwner = owner;
         try {
-          await signOut(auth);
+          await browserAuthSdk().signOut(auth);
         } finally {
           signingOutOwner = undefined;
         }

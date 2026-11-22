@@ -59,6 +59,7 @@ const harness = (workerCode = code) => {
   let online = true;
   let substitutePath = null;
   let liveBuild = buildId;
+  let liveStatus = 200;
   let claimed = false;
   let skipWaitingCalls = 0;
   const context = createContext({
@@ -75,9 +76,12 @@ const harness = (workerCode = code) => {
       if (!online) throw new Error('Offline fixture');
       const path = new URL(request.url).pathname;
       fetches.push(request);
+      if (appPaths.includes(path) && liveStatus === 307)
+        return Response.redirect('https://stilllight.test/login', 307);
       if (appPaths.includes(path))
         return new Response(html(liveBuild, 'Live response for ' + request.url), {
           headers: { 'x-arcana-build': liveBuild },
+          status: liveStatus,
         });
       return new Response(
         substitutePath === path ? '<html>Unexpected fallback</html>' : bodies.get(path),
@@ -167,6 +171,9 @@ const harness = (workerCode = code) => {
     },
     deploy: (id) => {
       liveBuild = id;
+    },
+    respondWithStatus: (status) => {
+      liveStatus = status;
     },
     get claimed() {
       return claimed;
@@ -265,6 +272,33 @@ test('online navigation returns fresh SSR while offline snapshots stay anonymous
   sw.setOnline(false);
   assert.equal(await (await sw.request(path)).text(), bodies.get(snapshot('/journal')));
   assert.equal(sw.ownCache.has(path), false);
+});
+
+test('SSR and Flight recover from server outages without swallowing redirects or client errors', async () => {
+  const sw = harness();
+  await sw.dispatch('install');
+  for (const status of [500, 503, 504]) {
+    sw.respondWithStatus(status);
+    assert.equal(await (await sw.request('/deck')).text(), bodies.get(snapshot('/deck')));
+    const flight = await sw.request('/deck?_rsc=a', 'cors', { rsc: '1' });
+    assert.equal(flight.headers.get('Content-Type'), 'text/x-component');
+    assert.equal(await flight.text(), bodies.get(snapshot('/deck', 'rsc')));
+  }
+  sw.respondWithStatus(307);
+  const redirect = await sw.request('/deck');
+  assert.equal(redirect.status, 307);
+  assert.equal(redirect.headers.get('location'), 'https://stilllight.test/login');
+  for (const status of [401, 403, 404, 429]) {
+    sw.respondWithStatus(status);
+    assert.equal((await sw.request('/deck')).status, status);
+    assert.equal((await sw.request('/deck?_rsc=a', 'cors', { rsc: '1' })).status, status);
+  }
+  sw.deploy('new-build');
+  sw.respondWithStatus(404);
+  assert.equal(await (await sw.request('/deck')).text(), bodies.get(snapshot('/deck')));
+  sw.ownCache.delete(snapshot('/deck'));
+  sw.respondWithStatus(503);
+  assert.equal((await sw.request('/deck')).status, 503);
 });
 
 test('a missing required entry cannot report ready offline and can be repaired online', async () => {

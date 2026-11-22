@@ -4,21 +4,35 @@ test.use({ javaScriptEnabled: false });
 
 test('direct requests render each public page before JavaScript runs', async ({ page }) => {
   const pages = [
-    ['/', /A question\. A card\./],
-    ['/deck', 'Card library'],
-    ['/journal', 'Your reading journal.'],
-    ['/login', 'Sign in'],
-    ['/signup', 'Create account'],
-    ['/reset-password', 'Reset password'],
+    ['/', /A question\. A card\./, 'Tarot Readings', 'custom tarot spread'],
+    ['/deck', 'Card library', 'Card Library', '78 tarot cards'],
+    ['/journal', 'Your reading journal.', 'Reading Journal', 'journal backups'],
+    ['/login', 'Sign in', 'Sign in', 'Sign in to Arcana Journal'],
+    ['/signup', 'Create account', 'Create account', 'verify your email'],
+    ['/reset-password', 'Reset password', 'Reset password', 'password reset link'],
   ] as const;
 
-  for (const [path, title] of pages) {
+  for (const [path, heading, title, description] of pages) {
     const response = await page.goto(path);
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
-    if (path === '/deck') {
+    await expect(page).toHaveTitle(`Arcana Journal · ${title}`);
+    await expect(page.locator('head meta[name="description"]')).toHaveAttribute(
+      'content',
+      new RegExp(description),
+    );
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    if (path === '/') {
+      await expect(page.getByLabel(/What’s on your mind/)).toBeVisible();
+      await expect(page.getByRole('button', { name: /Draw Cards/ })).toBeDisabled();
+    } else if (path === '/deck') {
       await expect(page.getByRole('button', { name: 'The Fool', exact: true })).toBeVisible();
       await expect(page.locator('.library-card')).toHaveCount(78);
+    } else if (path === '/journal') {
+      await expect(page.getByText('Loading readings…')).toBeVisible();
+      await expect(page.locator('.journal-entry')).toHaveCount(0);
+    } else {
+      await expect(page.getByLabel('Email address')).toBeVisible();
+      await expect(page.locator('form button[type="submit"]')).toBeDisabled();
     }
   }
 });

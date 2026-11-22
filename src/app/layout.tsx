@@ -1,12 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import '../styles.css';
-import '../components/AccountPanel.css';
 import '../components/AccountForm.css';
-import '../components/CardLibrary.css';
 
 export const metadata: Metadata = {
-  title: 'Arcana Journal · Tarot Readings',
+  title: { default: 'Arcana Journal · Tarot Readings', template: 'Arcana Journal · %s' },
   description:
     'A quiet space for tarot with an original 78-card deck. Keep your journal on this device or sign in to sync readings across devices.',
   manifest: '/manifest.webmanifest',

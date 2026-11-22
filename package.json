@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "build": "node scripts/check-art.mjs && next build --webpack && node scripts/build-sw.mjs && node scripts/check-art.mjs --built",
     "start": "next start",
-    "preview": "next start --hostname 127.0.0.1",
+    "preview": "next start --hostname 127.0.0.1 --port 4173",
     "test:browser": "playwright test",
     "test:cloud": "node --test --test-concurrency=1 scripts/test-cloud-journal.mjs scripts/test-cloud-ui.mjs",
     "test:update": "playwright test --config playwright.update.config.ts",

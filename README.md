@@ -6,7 +6,7 @@ Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by 
 
 Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
 
-The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. The response includes the reading form, the 78-card library or the appropriate page heading. After hydration, Firebase Authentication restores the session and the browser opens its guest or account journal. Draws, private readings and browser storage stay client-side.
+The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. Each page supplies its own title, description and public content. The initial HTML includes the reading form, the 78-card library, the journal loading state or the requested account form. After hydration, Firebase Authentication restores the browser session. Firestore loads when a verified account opens its journal. Draws and private readings stay on the device or in the signed-in account.
 
 ## Run it
 
@@ -17,17 +17,17 @@ npm ci
 npm run dev
 ```
 
-Open the local address printed by Next.js, normally [localhost:3000](http://localhost:3000).
+The development server opens at [127.0.0.1:3000](http://127.0.0.1:3000).
 
 ```sh
 npm run typecheck
 npm run format:check
 npm test
 npm run build
-npm start
+npm run preview
 ```
 
-`npm run build` validates the artwork, compiles the production app to `.next/`, captures the six public routes for offline use and writes the versioned worker to `public/sw.js`. Use `npm start` to run the production server or `npm run preview` to bind it to loopback. Service worker registration runs in production.
+`npm run build` validates the artwork, compiles the production app to `.next/`, captures the six public routes for offline use and writes the versioned worker to `public/sw.js`. The local production preview uses its own port so its service worker only controls that origin. Use `npm start` to run the production server on your host. [Open the local preview](http://127.0.0.1:4173).
 
 The generated worker also has a focused, dependency-free lifecycle harness:
 

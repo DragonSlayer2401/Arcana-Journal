@@ -142,10 +142,14 @@ self.addEventListener('fetch', (event) => {
         live = await fetch(event.request);
         // An open tab stays on its own build until the waiting worker activates.
         // For a matching build, always return the real request-time SSR response.
-        if (live.ok && live.headers.get('x-arcana-build') === BUILD_ID) return live;
-        if (!live.ok && live.status !== 404) return live;
+        const liveBuild = live.headers.get('x-arcana-build');
+        if (live.ok && liveBuild === BUILD_ID) return live;
+        // Keep client errors and redirects. A newer build can legitimately
+        // remove a route that an older client is still using.
+        const removedInNewBuild = live.status === 404 && liveBuild && liveBuild !== BUILD_ID;
+        if (!live.ok && live.status < 500 && !removedInNewBuild) return live;
       } catch {
-        // A cold launch or refresh can restore a canonical page while offline.
+        // A failed request shares the same fallback as a server outage.
       }
       const cached = await (await caches.open(CACHE_NAME)).match(snapshot + (flight ? '.rsc' : '.html'));
       if (!cached) return live || Response.error();

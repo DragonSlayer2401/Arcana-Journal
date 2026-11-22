@@ -1,21 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useJournalSession } from '../App';
+import { useJournalSession } from '../JournalProvider';
 import { resetPassword, signIn, signUp } from '../cloud/journal';
 import { accountError } from './accountError';
 
 type FormMode = 'signIn' | 'signUp' | 'reset';
 const titles = { signIn: 'Sign in', signUp: 'Create account', reset: 'Reset password' };
-const descriptions = {
-  signIn: 'Open your journal on this device.',
-  signUp: 'Verify your email to sync readings across your devices.',
-  reset: 'Enter your account email to request a password reset link.',
-};
+interface Props {
+  mode: FormMode;
+  heading: ReactNode;
+  description: ReactNode;
+}
 
-export const AccountForm = ({ mode }: { mode: FormMode }) => {
+export const AccountForm = ({ mode, heading, description }: Props) => {
   const { opening, user, authEmail: email, setAuthEmail: setEmail } = useJournalSession();
   const router = useRouter();
   useEffect(() => {
@@ -24,18 +24,27 @@ export const AccountForm = ({ mode }: { mode: FormMode }) => {
   if (user) return null;
   return (
     <section className="auth-page" aria-labelledby="auth-title">
-      <h1 id="auth-title">{titles[mode]}</h1>
-      <AccountFields key={mode} opening={opening} mode={mode} email={email} setEmail={setEmail} />
+      {heading}
+      <AccountFields
+        key={mode}
+        opening={opening}
+        mode={mode}
+        email={email}
+        setEmail={setEmail}
+        description={description}
+      />
     </section>
   );
 };
 
 const AccountFields = ({
+  description,
   opening,
   mode,
   email,
   setEmail,
 }: {
+  description: ReactNode;
   opening?: boolean;
   mode: FormMode;
   email: string;
@@ -103,7 +112,7 @@ const AccountFields = ({
 
   return (
     <>
-      <p className="auth-description">{descriptions[mode]}</p>
+      {description}
       <form
         className="auth-form"
         aria-labelledby="auth-title"
