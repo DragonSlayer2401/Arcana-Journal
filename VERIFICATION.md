@@ -1,5 +1,9 @@
 # Verification record
 
+## Vercel build, November 22, 2026
+
+A local Linux build using Vercel’s Next.js adapter produced six SSR functions. Each served HTML and a React Server Component response for its route. All 129 entries in the service worker’s cache manifest matched the packaged files by SHA-256, including all 78 card illustrations and both offline responses for each route.
+
 ## Next.js App Router migration, November 22, 2026
 
 The production build renders all six application routes on demand. With JavaScript disabled, direct requests show the reading form, all 78 deck entries, the journal heading and each account form. Browser authentication and journal restoration run after hydration.
@@ -12,7 +16,7 @@ The production build renders all six application routes on demand. With JavaScri
 
 ## Earlier Vite build, November 19, 2026
 
-Verified on November 19, 2026, on Windows. This is a local production build; no Cloudflare deployment or physical iPhone test was performed.
+Verified locally on Windows on November 19, 2026. Mobile checks used browser emulation.
 
 ## Passed automated checks
 

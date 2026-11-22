@@ -38,7 +38,6 @@ before(async () => {
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, body);
   }
-  await writeFile(join(testRoot, 'public', '_headers'), '/sw.js\n  Cache-Control: no-cache');
   await buildWorker(testRoot, buildId);
   code = await readFile(join(testRoot, 'public', 'sw.js'), 'utf8');
 });
@@ -53,7 +52,7 @@ after(async () => {
   await rm(resolved, { recursive: true, force: true });
 });
 
-const harness = () => {
+const harness = (workerCode = code) => {
   const stores = new Map();
   const listeners = new Map();
   const fetches = [];
@@ -75,7 +74,7 @@ const harness = () => {
     fetch: async (request) => {
       if (!online) throw new Error('Offline fixture');
       const path = new URL(request.url).pathname;
-      fetches.push(path);
+      fetches.push(request);
       if (appPaths.includes(path))
         return new Response(html(liveBuild, 'Live response for ' + request.url), {
           headers: { 'x-arcana-build': liveBuild },
@@ -114,7 +113,7 @@ const harness = () => {
       addEventListener: (type, listener) => listeners.set(type, listener),
     },
   });
-  runInContext(code, context);
+  runInContext(workerCode, context);
   const dispatch = async (type, details = {}) => {
     let pending;
     listeners.get(type)({
@@ -181,12 +180,37 @@ const harness = () => {
   };
 };
 
-test('the generated precache includes all runtime assets and excludes hosting instructions', async () => {
+test('the generated precache includes all runtime assets with same-origin credentials', async () => {
   const sw = harness();
   await sw.dispatch('install');
   assert.deepEqual([...sw.ownCache.keys()].sort(), [...bodies.keys()].sort());
-  assert.equal(sw.fetches.includes('/_headers'), false);
+  assert.ok(sw.fetches.every((request) => request.credentials === 'same-origin'));
   assert.equal((await sw.status()).ready, true);
+});
+
+test('the Vercel adapter receives the generated snapshots and current worker', async () => {
+  const output = join(testRoot, '.next/output');
+  const staticDir = join(output, 'static');
+  await mkdir(staticDir, { recursive: true });
+  await writeFile(join(output, 'config.json'), '{"version":3}');
+  await writeFile(join(staticDir, 'sw.js'), 'previous worker');
+  const deploymentId = 'dpl_preview_fixture';
+  await buildWorker(testRoot, buildId, deploymentId);
+  const published = await readFile(join(staticDir, 'sw.js'), 'utf8');
+  assert.equal(published, await readFile(join(testRoot, 'public/sw.js'), 'utf8'));
+  for (const path of appPaths) {
+    for (const extension of ['html', 'rsc']) {
+      const url = snapshot(path, extension);
+      assert.equal(await readFile(join(staticDir, url.slice(1)), 'utf8'), bodies.get(url));
+    }
+  }
+  const sw = harness(published);
+  await sw.dispatch('install');
+  for (const request of sw.fetches) {
+    assert.equal(request.headers.get('x-deployment-id'), deploymentId);
+    if (request.url.endsWith('.html'))
+      assert.equal(request.headers.get('x-vercel-skip-toolbar'), '1');
+  }
 });
 
 test('offline navigation and assets are served from the installed version', async () => {

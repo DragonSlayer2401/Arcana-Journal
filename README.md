@@ -4,6 +4,8 @@ Arcana Journal is a server-rendered Next.js tarot PWA built with React and TypeS
 
 Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
 
+Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
+
 The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. The response includes the reading form, the 78-card library or the appropriate page heading. After hydration, Firebase Authentication restores the session and the browser opens its guest or account journal. Draws, private readings and browser storage stay client-side.
 
 ## Run it
@@ -111,7 +113,9 @@ When upgrading, let **Clear History** and queued changes finish in older tabs be
 
 ### Firebase setup for this deployment
 
-The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize the deployment hostname for email redirects (the existing hostname is `arcana-journal.jacobskip7.workers.dev`), and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+
+Verification and password-reset emails return to `/journal` on the hostname that requested them. The production hostname `arcana-journal-theta.vercel.app` belongs in **Authentication → Settings → Authorized domains** in Firebase. If you test email actions on a Vercel preview, authorize that preview hostname too. [Firebase email action domains](https://firebase.google.com/docs/auth/web/passing-state-in-email-actions)
 
 Publish `firestore.rules` before releasing the frontend. The rules allow the optional, immutable `sourceId` used to restore readings whose legacy IDs collided. They also cover the account-specific document that coordinates imports with **Clear History**. Publish the rules in **Firestore → Rules**, or run the following command from this directory while signed in to the project.
 
@@ -135,13 +139,13 @@ Online navigation uses the running Next.js server. When offline, the worker can 
 
 Service workers require HTTPS in production and also work on localhost. [Service worker requirements](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API/Using_Service_Workers)
 
-## Deploy the SSR app
+## Deploy on Vercel
 
-On a Node.js host, install dependencies with `npm ci`, build with `npm run build`, and start the service with `npm start`. Set `PORT` to the port assigned by your host and serve it over HTTPS. Keep the whole production build together, including `.next/`, `public/` and the generated `public/sw.js`. [Next.js deployment guide](https://nextjs.org/docs/app/getting-started/deploying)
+Use the repository root as the Vercel project’s **Root Directory**. This branch’s `vercel.json` selects Next.js, runs `npm run build` to generate the SSR routes and offline assets, and uses the `.next` output directory. [Vercel project configuration](https://vercel.com/docs/project-configuration/vercel-json)
 
-To package a completed build on Windows, run `./scripts/package-release.ps1` in PowerShell. Extract `release/ArcanaJournal-nextjs.zip` on the Node.js host, run `npm ci --omit=dev` there, then `npm start`.
+If the site address changes, export guest readings from the old address and import the backup at the new one. Sign in to the same account to open readings already synced to Firebase.
 
-The existing Cloudflare Workers site used a static-assets upload. Serving this version on that hostname requires a Worker that can run Next.js SSR. Keep the same production origin when moving the runtime so returning users retain access to guest journals and trusted-device storage. [Cloudflare Workers guide for Next.js](https://developers.cloudflare.com/workers/framework-guides/web-apps/nextjs/)
+To verify a deployment, open `/deck` directly, wait for **Ready for offline use**, then take the browser offline and reload. The deck should still show all 78 cards.
 
 ## Add to your iPhone Home Screen
 

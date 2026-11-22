@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { cp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import appPaths from '../src/routes.json' with { type: 'json' };
@@ -22,8 +23,7 @@ export async function buildWorker(project, buildId, deploymentId = null) {
   ]) {
     for (const file of await collect(root)) {
       const name = relative(root, file).split(sep).map(encodeURIComponent).join('/');
-      if (name === 'sw.js' || name === '_headers' || name === '_redirects' || name.endsWith('.map'))
-        continue;
+      if (name === 'sw.js' || name.endsWith('.map')) continue;
       assets.push({
         url: prefix + name,
         sha256: createHash('sha256')
@@ -53,6 +53,7 @@ const CACHE_NAME = CACHE_PREFIX + '${version}';
 const ASSETS = ${JSON.stringify(assets)};
 const BUILD_ID = ${JSON.stringify(buildId)};
 const FLIGHT_HEADERS = ${JSON.stringify({ 'Content-Type': 'text/x-component', ...(deploymentId ? { 'x-nextjs-deployment-id': deploymentId } : {}) })};
+const ASSET_HEADERS = ${JSON.stringify(deploymentId ? { 'x-deployment-id': deploymentId } : {})};
 const SNAPSHOTS = new Map(Object.entries(${JSON.stringify(snapshots)}));
 const REQUIRED_URLS = new Set(ASSETS.map((asset) => asset.url));
 const digest = async (buffer) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', buffer)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -65,7 +66,9 @@ const isComplete = async () => {
   return results.every(Boolean);
 };
 const fetchVerified = async ({ url, sha256 }) => {
-  const response = await fetch(new Request(url, { cache: 'reload', credentials: 'omit' }));
+  // Preserve preview authentication and keep the toolbar out of verified HTML bytes.
+  const headers = url.endsWith('.html') ? { ...ASSET_HEADERS, 'x-vercel-skip-toolbar': '1' } : ASSET_HEADERS;
+  const response = await fetch(new Request(url, { cache: 'reload', credentials: 'same-origin', headers }));
   if (!response.ok || await digest(await response.clone().arrayBuffer()) !== sha256) {
     throw new Error('Unable to cache required asset: ' + url);
   }
@@ -168,6 +171,17 @@ self.addEventListener('fetch', (event) => {
 });
 `;
   await writeFile(resolve(project, 'public/sw.js'), worker);
+  // Vercel's Next adapter assembles its output during next build, before the
+  // offline documents and worker exist. Update any previous worker too.
+  const adapterOutput = resolve(project, '.next/output');
+  if (existsSync(resolve(adapterOutput, 'config.json'))) {
+    await cp(
+      resolve(project, '.next/static', buildId, 'offline'),
+      resolve(adapterOutput, 'static/_next/static', buildId, 'offline'),
+      { recursive: true },
+    );
+    await writeFile(resolve(adapterOutput, 'static/sw.js'), worker);
+  }
   console.log(
     `Built service worker ${version}: ${assets.length} required assets, verified at installation.`,
   );
