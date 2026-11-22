@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import {
   backupNeedsSizeConfirmation,
   createJournalBackup,
+  mergeJournalReadings,
   parseJournalBackup,
+  UncheckedDeletionsExportError,
 } from '../domain/journalBackup';
 import type { Reading } from '../domain/types';
+import type { RecoveryCopy } from '../domain/readingRecovery';
 import { Modal } from './Modal';
 import './AccountPanel.css';
 
@@ -12,14 +15,31 @@ export interface ImportCounts {
   added: number;
   skipped: number;
   updated?: number;
+  uncheckedDeletions?: boolean;
+}
+
+export interface JournalExport {
+  json: string;
+  scope: 'journal' | 'cloud-and-tab' | 'unchecked-deletions';
+}
+
+interface SavedRecovery {
+  readings: Reading[];
+  isCurrent: () => boolean;
+  discard: () => void;
+  retainUntilChecked: () => { copies: RecoveryCopy[]; discard: () => void };
 }
 
 interface Props {
   accountEmail: string | null;
-  deviceCount: number;
+  deviceCount: number | 'unsaved';
   recoveryReadings?: Reading[];
-  getDeviceReadings: () => Reading[];
-  onExport: () => Promise<string>;
+  deletionStorageUnreadable?: boolean;
+  recoveryComplete?: boolean;
+  getRecoveryForExport?: () => { readings: Reading[]; complete: boolean };
+  savedRecovery?: SavedRecovery;
+  getDeviceReadings: () => Reading[] | Promise<Reading[]>;
+  onExport: (allowUncheckedDeletions?: boolean) => Promise<JournalExport>;
   onPreview: (
     incoming: Reading[],
     onProgress: (completed: number, total: number) => void,
@@ -27,6 +47,9 @@ interface Props {
   onImport: (
     incoming: Reading[],
     onProgress: (completed: number, total: number) => void,
+    allowUncheckedDeletions?: boolean,
+    retainedCopies?: RecoveryCopy[],
+    recovering?: boolean,
   ) => Promise<ImportCounts>;
 }
 
@@ -50,6 +73,10 @@ export const JournalTransfer = ({
   accountEmail,
   deviceCount,
   recoveryReadings = [],
+  deletionStorageUnreadable = false,
+  recoveryComplete = true,
+  getRecoveryForExport,
+  savedRecovery,
   getDeviceReadings,
   onExport,
   onPreview,
@@ -62,10 +89,12 @@ export const JournalTransfer = ({
     source: string;
     readings: Reading[];
     counts: ImportCounts;
+    recovery?: SavedRecovery;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [exportWarning, setExportWarning] = useState('');
 
   useEffect(() => {
     if (!download) return;
@@ -84,55 +113,118 @@ export const JournalTransfer = ({
       await action();
     } catch (cause) {
       setStatus('');
-      setError(cause instanceof Error ? cause.message : 'The journal transfer could not finish.');
+      if (cause instanceof UncheckedDeletionsExportError) setExportWarning(cause.message);
+      else
+        setError(cause instanceof Error ? cause.message : 'The journal transfer could not finish.');
     } finally {
       setBusy(false);
     }
   };
 
-  const exportJournal = (recoveryOnly: boolean) =>
-    run('Preparing your journal backup…', async () => {
-      const json = recoveryOnly
-        ? await createJournalBackup(() => ({
-            readings: recoveryReadings,
-            nextCursor: null,
-          }))
-        : await onExport();
-      if (!fileInput.current) return;
-      setDownload({
-        url: URL.createObjectURL(new Blob([json], { type: 'application/json' })),
-        filename: `arcana-journal-${recoveryOnly ? 'unsynced-' : ''}${new Date().toISOString().slice(0, 10)}.json`,
-      });
-      setStatus(
-        recoveryOnly
-          ? `Backup ready for ${readingCount(recoveryReadings.length)} awaiting sync.`
-          : 'Your backup is ready.',
-      );
+  const prepareDownload = (json: string, fileScope: string, message: string) => {
+    if (!fileInput.current) return;
+    setDownload({
+      url: URL.createObjectURL(new Blob([json], { type: 'application/json' })),
+      filename: `arcana-journal-${fileScope}${new Date().toISOString().slice(0, 10)}.json`,
+    });
+    setStatus(message);
+  };
+
+  const exportGuestJournal = () =>
+    run('Preparing your guest journal backup…', async () => {
+      const readings = await getDeviceReadings();
+      const json = await createJournalBackup(() => ({ readings, nextCursor: null }));
+      prepareDownload(json, 'guest-', `Guest backup ready for ${readingCount(readings.length)}.`);
     });
 
-  const previewImport = (source: string, read: () => Reading[] | Promise<Reading[]>) =>
+  const exportJournal = (source: 'journal' | 'available' | 'recovery') =>
+    run('Preparing your journal backup…', async () => {
+      const recovery =
+        source === 'recovery'
+          ? (getRecoveryForExport?.() ?? { readings: recoveryReadings, complete: recoveryComplete })
+          : null;
+      const partial = recovery?.complete === false;
+      if (partial && (recoveryComplete || !recovery.readings.length))
+        throw new Error(
+          'Some recovery copies could not be read. Check storage access before downloading your unsynced readings.',
+        );
+      if (recovery && !recovery.readings.length) {
+        setStatus('No readings are awaiting sync.');
+        return;
+      }
+      let json: string;
+      let fileScope = '';
+      let message = 'Your backup is ready.';
+      if (recovery) {
+        json = await createJournalBackup(async () => ({
+          readings: (await mergeJournalReadings([], recovery.readings)).readings,
+          nextCursor: null,
+        }));
+        fileScope = partial ? 'unsynced-partial-' : 'unsynced-';
+        message = partial
+          ? `Partial backup ready for ${readingCount(recovery.readings.length)}. Other recovery copies could not be read.`
+          : `Backup ready for ${readingCount(recovery.readings.length)} awaiting sync.`;
+      } else {
+        const result = await onExport(source === 'available');
+        if (source === 'journal') setExportWarning('');
+        json = result.json;
+        if (result.scope === 'unchecked-deletions') {
+          fileScope = 'cloud-and-this-tab-unchecked-deletions-';
+          message =
+            'This backup contains cloud readings and recovery copies available in this tab. It may include readings waiting to be deleted.';
+        } else if (result.scope === 'cloud-and-tab') {
+          fileScope = 'cloud-and-this-tab-';
+          message =
+            'Backup includes cloud readings and recovery copies available in this tab. Other tabs may have unsynced readings.';
+        }
+      }
+      prepareDownload(json, fileScope, message);
+    });
+
+  const previewImport = (
+    source: string,
+    read: () => Reading[] | Promise<Reading[]>,
+    recovery?: SavedRecovery,
+  ) =>
     run('Checking readings for import…', async () => {
       const readings = await read();
       if (!fileInput.current) return;
       const counts = await onPreview(readings, (completed, total) =>
         setStatus(`Checked ${completed} of ${readingCount(total)}…`),
       );
-      setPreview({ readings, counts, source });
+      setPreview({ readings, counts, source, recovery });
       setStatus('');
     });
 
   const finishImport = () => {
     if (!preview) return;
     void run('Importing readings…', async () => {
-      const result = await onImport(preview.readings, (completed, total) =>
-        setStatus(`Processed ${completed} of ${readingCount(total)}…`),
+      if (preview.recovery && !preview.recovery.isCurrent()) {
+        setPreview(null);
+        throw new Error(
+          'The recovery copies changed or are unavailable. Review the current copies before importing.',
+        );
+      }
+      const unchecked = preview.counts.uncheckedDeletions === true;
+      const retained = unchecked ? preview.recovery?.retainUntilChecked() : undefined;
+      const result = await onImport(
+        preview.readings,
+        (completed, total) => setStatus(`Processed ${completed} of ${readingCount(total)}…`),
+        unchecked,
+        retained?.copies,
+        preview.recovery !== undefined,
       );
+      if (!result.uncheckedDeletions) (retained?.discard ?? preview.recovery?.discard)?.();
       setPreview(null);
       const message = [`Imported ${readingCount(result.added)}.`];
       if (result.updated)
         message.push(`Updated reveal progress for ${readingCount(result.updated)}.`);
       if (result.skipped)
         message.push(`Skipped ${readingCount(result.skipped)} already in your journal.`);
+      if (result.uncheckedDeletions && preview.recovery)
+        message.push(
+          'Your recovery copies are still available because saved deletions could not be checked.',
+        );
       setStatus(message.join(' '));
     });
   };
@@ -144,9 +236,63 @@ export const JournalTransfer = ({
 
   return (
     <div className="journal-backup">
-      {accountEmail && deviceCount > 0 && (
+      {accountEmail && savedRecovery && savedRecovery.readings.length > 0 && (
         <div className="journal-device-import">
-          <p>This browser has {readingCount(deviceCount)} in its guest journal.</p>
+          <p>
+            This browser has a recovery copy of {readingCount(savedRecovery.readings.length)} for
+            your account.
+          </p>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void previewImport(
+                'Unsynced readings on this device',
+                () => savedRecovery.readings,
+                savedRecovery,
+              )
+            }
+          >
+            Recover unsynced readings
+          </button>
+          <button
+            className="text-button"
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (
+                window.confirm(
+                  'Discard these recovery copies from this browser? Unsynced readings could be lost.',
+                )
+              )
+                savedRecovery.discard();
+            }}
+          >
+            Discard recovery copies
+          </button>
+        </div>
+      )}
+      {accountEmail && (deviceCount === 'unsaved' || deviceCount > 0) && (
+        <div className="journal-device-import">
+          {deviceCount === 'unsaved' ? (
+            <>
+              <p>
+                This tab has unsaved guest changes. Download a guest backup before closing or
+                reloading.
+              </p>
+              <button
+                className="text-button"
+                type="button"
+                disabled={busy}
+                onClick={() => void exportGuestJournal()}
+              >
+                Download guest backup
+              </button>
+            </>
+          ) : (
+            <p>This browser has {readingCount(deviceCount)} in its guest journal.</p>
+          )}
           <button
             className="button button-secondary"
             type="button"
@@ -157,23 +303,44 @@ export const JournalTransfer = ({
           </button>
         </div>
       )}
+      {deletionStorageUnreadable && (
+        <p>
+          This browser cannot check saved deletions. Restore storage access for a checked backup, or
+          export the available readings, which may include readings waiting to be deleted.
+        </p>
+      )}
+      {exportWarning && !deletionStorageUnreadable && <p role="alert">{exportWarning}</p>}
       <div className="journal-backup-buttons" role="group" aria-label="Journal backups">
-        <button
-          className="button button-secondary"
-          type="button"
-          disabled={busy}
-          onClick={() => void exportJournal(false)}
-        >
-          Export journal
-        </button>
+        {!deletionStorageUnreadable && (
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => void exportJournal('journal')}
+          >
+            Export journal
+          </button>
+        )}
+        {(exportWarning || deletionStorageUnreadable) && (
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={busy}
+            onClick={() => void exportJournal('available')}
+          >
+            Export available readings
+          </button>
+        )}
         {recoveryReadings.length > 0 && (
           <button
             className="button button-secondary"
             type="button"
             disabled={busy}
-            onClick={() => void exportJournal(true)}
+            onClick={() => void exportJournal('recovery')}
           >
-            Download unsynced readings
+            {recoveryComplete
+              ? 'Download unsynced readings'
+              : 'Download available unsynced readings (partial backup)'}
           </button>
         )}
         <button
@@ -239,6 +406,22 @@ export const JournalTransfer = ({
             <dt>Already in journal</dt>
             <dd>{preview.counts.skipped}</dd>
           </dl>
+          {preview.counts.uncheckedDeletions && (
+            <p className="notice warning">
+              Saved deletions could not be checked. A matching reading might still be deleted after
+              this import. Restore browser storage to check before importing.
+            </p>
+          )}
+          {preview.recovery && (
+            <ul aria-label="Readings to recover">
+              {preview.readings.map((reading, index) => (
+                <li key={index}>
+                  {reading.question || 'Untitled reading'} ·{' '}
+                  {new Date(reading.createdAt).toLocaleDateString()}
+                </li>
+              ))}
+            </ul>
+          )}
           {error && (
             <p className="notice warning" role="alert">
               {error} You can retry this import. Readings already added are kept.

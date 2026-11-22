@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import {
   Link,
   Navigate,
@@ -11,24 +18,42 @@ import {
 } from 'react-router-dom';
 import { DECK, CARD_BY_ID } from './data/deck';
 import { drawCards } from './domain/random';
+import { waitForGuestWrites, withGuestWrite } from './domain/guestWrite';
+import { recoverGuestReadings } from './domain/guestRecovery';
 import {
   createJournalBackup,
   mergeJournalReadings,
   parseJournalBackup,
+  sameReadingContent,
 } from './domain/journalBackup';
-import { formatReading, freshData, loadData, saveData, type AppData } from './domain/storage';
+import {
+  formatReading,
+  freshData,
+  guestSaveWarning,
+  loadData,
+  saveData,
+  type AppData,
+} from './domain/storage';
 import {
   observeAccount,
+  isJournalLocked,
+  isJournalLockedInThisTabOnly,
+  observeJournalLock,
+  lockJournal,
   exportAccountJournal,
+  checkReadingsForPendingDeletions,
   previewAccountImport,
   importAccountReadings,
   type JournalUser,
 } from './cloud/journal';
 import { useAccountJournal } from './useAccountJournal';
+import { checkSiblingRecovery } from './cloud/journalActivity';
 import { AccountForm } from './components/AccountForm';
 import { AccountPanel } from './components/AccountPanel';
-import { JournalTransfer } from './components/JournalTransfer';
+import { IncompleteSignOut, LockedJournal } from './components/LockedJournal';
+import { JournalTransfer, type JournalExport } from './components/JournalTransfer';
 import type { Reading, Settings } from './domain/types';
+import type { RecoveryCopy } from './domain/readingRecovery';
 import { CardArtwork, CardBackArtwork } from './components/CardArtwork';
 import { CardLibrary } from './components/CardLibrary';
 import { JournalPage } from './components/JournalPage';
@@ -40,9 +65,21 @@ const CARD_IDS = Object.freeze(DECK.map((card) => card.id));
 const dateLabel = (date: string) =>
   new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
+type GuestChange = (current: AppData) => AppData;
+interface GuestDraft {
+  data: AppData;
+  base: AppData;
+}
+const guestConflictMessage =
+  'The saved guest journal changed while this tab had unsaved readings. Export your backup, then reload and import it to merge the readings.';
+const guestWriteUnavailable =
+  'This browser could not coordinate changes to the guest journal. Your edits are available in this tab. Export a backup before closing it.';
+const guestDraftConflicts = (draft: GuestDraft | null, stored: ReturnType<typeof loadData>) =>
+  draft && !stored.warning && JSON.stringify(draft.base) !== JSON.stringify(stored.data);
+
 export default function App() {
   const [user, setUser] = useState<JournalUser | null | undefined>(undefined);
-  const guestDraft = useRef<AppData | null>(null);
+  const guestDraft = useRef<GuestDraft | null>(null);
   useEffect(() => observeAccount(setUser), []);
   if (user === undefined)
     return (
@@ -50,6 +87,7 @@ export default function App() {
         <p role="status">Opening Arcana Journal…</p>
       </main>
     );
+  if (user?.signOutIncomplete) return <IncompleteSignOut uid={user.uid} />;
   const journalUid = user?.emailVerified ? user.uid : undefined;
   return (
     <JournalSession
@@ -92,32 +130,54 @@ function JournalSession({
 }: {
   user: JournalUser | null;
   journalUid: string | undefined;
-  guestDraft: RefObject<AppData | null>;
+  guestDraft: RefObject<GuestDraft | null>;
 }) {
+  const uid = user?.uid;
+  const subscribeToLock = useCallback(
+    (notify: () => void) => (uid ? observeJournalLock(uid, notify) : () => {}),
+    [uid],
+  );
+  const lockScope = useSyncExternalStore(subscribeToLock, () => {
+    if (!uid || !isJournalLocked(uid)) return 'open';
+    return isJournalLockedInThisTabOnly(uid) ? 'tab' : 'browser';
+  });
+  const locked = lockScope !== 'open';
   const [initial] = useState(() =>
     journalUid
       ? loadAccountView(journalUid)
       : guestDraft.current
         ? {
-            data: guestDraft.current,
+            data: guestDraft.current.data,
             warning: 'Your unsaved guest readings are available in this session.',
           }
         : loadData(),
   );
   const [data, setData] = useState(initial.data);
   const dataRef = useRef(data);
+  const guestViewVersion = useRef(0);
   const drawLocked = useRef(Boolean(data.activeId) || data.awaitingNewReading);
-  const account = useAccountJournal(journalUid, data.activeId);
-  const [deviceCount, setDeviceCount] = useState(() =>
-    journalUid ? (guestDraft.current ?? loadData().data).readings.length : 0,
+  // Detach the reading listeners while locked. Keep this session's write and retry state
+  // alive until the account changes, including draws that are still waiting on Firebase.
+  const account = useAccountJournal(journalUid, data.activeId, locked);
+  const getDeviceCount = useCallback(
+    () => (guestDraft.current ? ('unsaved' as const) : loadData().data.readings.length),
+    [guestDraft],
   );
+  const [deviceCount, setDeviceCount] = useState(() => (journalUid ? getDeviceCount() : 0));
   useEffect(() => {
     if (!journalUid) return;
-    const refreshCount = () =>
-      setDeviceCount((guestDraft.current ?? loadData().data).readings.length);
+    let active = true;
+    const refreshCount = () => {
+      if (active) setDeviceCount(getDeviceCount());
+    };
+    // A guest write can finish after signing in has mounted the account journal.
+    void waitForGuestWrites().then(refreshCount);
     window.addEventListener('storage', refreshCount);
-    return () => window.removeEventListener('storage', refreshCount);
-  }, [journalUid, guestDraft]);
+    return () => {
+      active = false;
+      window.removeEventListener('storage', refreshCount);
+    };
+  }, [journalUid, getDeviceCount]);
   const [warning, setWarning] = useState(initial.warning);
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
@@ -125,7 +185,7 @@ function JournalSession({
   const { pathname } = useLocation();
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState<number | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<{ id: string } | 'all' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Reading | 'all' | null>(null);
   const [copyText, setCopyText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [offline, setOffline] = useState<'checking' | 'ready' | 'unavailable' | 'error'>(
@@ -147,7 +207,13 @@ function JournalSession({
     setConfirmDelete(null);
     setCopyText(null);
     setHelp(false);
-  }, [pathname]);
+  }, [pathname, locked]);
+
+  useEffect(() => {
+    if (!confirmDelete || confirmDelete === 'all') return;
+    const current = readings.find(({ id }) => id === confirmDelete.id);
+    if (!current || !sameReadingContent(current, confirmDelete)) setConfirmDelete(null);
+  }, [confirmDelete, readings]);
 
   useEffect(
     () =>
@@ -158,13 +224,56 @@ function JournalSession({
     [],
   );
 
+  if (user && locked) {
+    return (
+      <LockedJournal
+        key={user.uid}
+        uid={user.uid}
+        hasFailedWrites={account.hasFailedWrites}
+        saving={account.saving}
+        needsOpenTab={account.needsOpenTab}
+        tabOnly={lockScope === 'tab'}
+      />
+    );
+  }
+
   const showData = (next: AppData) => {
     dataRef.current = next;
     setData(next);
   };
-  // A failed save still leaves a drawn spread available to reveal and export in this session.
-  const commit = (next: AppData) => {
+  const currentJournal = () => {
+    const draft = guestDraft.current;
+    return draft ? { data: draft.data, warning: '' } : loadData();
+  };
+  const saveGuestChange = (
+    stored: ReturnType<typeof loadData>,
+    change: GuestChange,
+    view: AppData,
+    version: number,
+    storageIssue?: string,
+  ) => {
+    const draft = guestDraft.current;
+    const current = draft?.data ?? stored.data;
+    const next = change(current);
+    const issue = guestDraftConflicts(draft, stored)
+      ? guestConflictMessage
+      : storageIssue || (stored.storageUnavailable ? guestSaveWarning : saveData(next));
+    guestDraft.current = issue ? { data: next, base: draft?.base ?? current } : null;
+    setWarning(issue);
+    // Another tab's selected spread is part of its saved state. Keep this tab
+    // on the spread the user was viewing when they made the edit.
+    if (version === guestViewVersion.current) {
+      const activeId = next.readings.some((item) => item.id === view.activeId)
+        ? view.activeId
+        : null;
+      showData({ ...view, readings: next.readings, activeId });
+      drawLocked.current = Boolean(activeId) || view.awaitingNewReading;
+    }
+    return issue;
+  };
+  const commit = (change: GuestChange) => {
     if (journalUid) {
+      const next = change(dataRef.current);
       const { settings, activeId, awaitingNewReading } = next;
       try {
         sessionStorage.setItem(
@@ -177,35 +286,76 @@ function JournalSession({
       showData(next);
       return;
     }
-    const issue = saveData(next);
-    guestDraft.current = issue ? next : null;
-    setWarning(issue);
-    showData(next);
+    const previous = dataRef.current;
+    const view = change(previous);
+    const version = ++guestViewVersion.current;
+    dataRef.current = view;
+    // Settings and navigation take effect before the next tap, even when a
+    // sibling is writing. Show new or changed spreads once their save finishes.
+    if (view.readings === previous.readings) setData(view);
+    // If storage is inaccessible, apply the edit to the view from before this
+    // action. The optimistic view already contains the draw or reveal.
+    const save = (issue?: string) =>
+      saveGuestChange(loadData(previous), change, view, version, issue);
+    void withGuestWrite(
+      () => save(),
+      () => save(guestWriteUnavailable),
+    );
   };
-  const currentJournal = () => {
-    if (guestDraft.current) return { data: guestDraft.current, warning: '' };
-    // Another tab may have added readings since this page opened.
-    return loadData();
+  const guestReadingsForTransfer = async () => {
+    await waitForGuestWrites();
+    const draft = guestDraft.current;
+    const stored = loadData();
+    if (draft)
+      return guestDraftConflicts(draft, stored)
+        ? recoverGuestReadings(draft.base.readings, draft.data.readings, stored.data.readings)
+        : draft.data.readings;
+    if (stored.warning) throw new Error('The saved journal could not be read to create a backup.');
+    return stored.data.readings;
   };
-  const exportJournal = async () => {
+  const exportJournal = async (allowUncheckedDeletions = false): Promise<JournalExport> => {
     if (journalUid) {
-      const backup = await exportAccountJournal(journalUid);
-      if (!account.recoveryReadings.length) return backup;
-      const { readings } = await mergeJournalReadings(
-        parseJournalBackup(backup),
-        account.recoveryReadings,
-      );
-      return createJournalBackup(() => ({ readings, nextCursor: null }));
-    }
-    return createJournalBackup(() => {
-      const { data: journal, warning: readWarning } = currentJournal();
-      if (readWarning) {
-        throw new Error('The saved journal could not be read to create a backup.');
+      const checkOtherTabs = async () => {
+        const status = await checkSiblingRecovery(journalUid);
+        if (status === 'busy')
+          throw new Error(
+            'Another tab has unsynced journal changes. Sync or recover those readings in that tab, then export again.',
+          );
+      };
+      await checkOtherTabs();
+      let json = await exportAccountJournal(journalUid, allowUncheckedDeletions);
+      const cloudReadings = parseJournalBackup(json);
+      const recovery = account.getRecoveryForExport();
+      if (!recovery.complete)
+        throw new Error(
+          'A complete backup needs access to every recovery copy. Allow browser storage and export again.',
+        );
+      if (recovery.readings.length) {
+        const { readings } = await mergeJournalReadings(
+          cloudReadings,
+          recovery.readings,
+          recovery.assignedIds,
+        );
+        await checkReadingsForPendingDeletions(
+          journalUid,
+          readings.map(({ id }) => id),
+          allowUncheckedDeletions,
+        );
+        json = await createJournalBackup(() => ({ readings, nextCursor: null }));
       }
-      return { readings: journal.readings, nextCursor: null };
-    });
+      await checkOtherTabs();
+      // An isolated or suspended tab may be unable to advertise memory-only readings.
+      return { json, scope: allowUncheckedDeletions ? 'unchecked-deletions' : 'cloud-and-tab' };
+    }
+    const json = await createJournalBackup(async () => ({
+      readings: await guestReadingsForTransfer(),
+      nextCursor: null,
+    }));
+    return { json, scope: 'journal' };
   };
   const deviceJournal = () => {
+    if (guestDraft.current && guestDraftConflicts(guestDraft.current, loadData()))
+      throw new Error(guestConflictMessage);
     const { data: device, warning: readWarning } = currentJournal();
     if (readWarning) {
       throw new Error(
@@ -224,34 +374,48 @@ function JournalSession({
   const importJournal = async (
     incoming: Reading[],
     onProgress?: (done: number, total: number) => void,
+    allowUncheckedDeletions = false,
+    retainedCopies?: RecoveryCopy[],
+    recovering = false,
   ) => {
-    if (journalUid) return importAccountReadings(journalUid, incoming, onProgress);
-    // Hashing older IDs can yield. Recheck the source before saving across tabs.
-    let current = deviceJournal();
-    let result = await mergeJournalReadings(current.readings, incoming);
-    let latest = deviceJournal();
-    while (JSON.stringify(latest) !== JSON.stringify(current)) {
-      current = latest;
-      result = await mergeJournalReadings(current.readings, incoming);
-      latest = deviceJournal();
+    if (journalUid)
+      return importAccountReadings(
+        journalUid,
+        incoming,
+        onProgress,
+        allowUncheckedDeletions,
+        retainedCopies,
+        recovering,
+      );
+    // Hash older IDs outside the storage transaction. Retry the merge if a
+    // sibling changed the guest journal before the final synchronous save.
+    for (;;) {
+      const current = deviceJournal();
+      const result = await mergeJournalReadings(current.readings, incoming);
+      const saved = await withGuestWrite(() => {
+        if (JSON.stringify(deviceJournal()) !== JSON.stringify(current)) return false;
+        const next = { ...current, readings: result.readings };
+        if (result.added || result.updated || guestDraft.current) {
+          if (saveData(next))
+            throw new Error(
+              'This device could not save the imported readings. Keep your backup and try again.',
+            );
+          guestDraft.current = null;
+          setWarning('');
+        }
+        const view = dataRef.current;
+        const activeId = next.readings.some((item) => item.id === view.activeId)
+          ? view.activeId
+          : null;
+        showData({ ...view, readings: next.readings, activeId });
+        drawLocked.current = Boolean(activeId) || view.awaitingNewReading;
+        return true;
+      });
+      if (saved) return result;
     }
-    const next = { ...current, readings: result.readings };
-    if (result.added || result.updated || guestDraft.current) {
-      if (saveData(next)) {
-        throw new Error(
-          'This device could not save the imported readings. Keep your backup and try again.',
-        );
-      }
-      guestDraft.current = null;
-      setWarning('');
-    }
-    drawLocked.current = Boolean(next.activeId) || next.awaitingNewReading;
-    showData(next);
-    return result;
   };
   const updateSettings = (patch: Partial<Settings>) => {
-    const current = dataRef.current;
-    commit({ ...current, settings: { ...current.settings, ...patch } });
+    commit((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
   };
   const draw = (event: React.FormEvent) => {
     event.preventDefault();
@@ -272,12 +436,14 @@ function JournalSession({
         revealed: cards.map(() => false),
       };
       if (journalUid) account.saveDraw(result);
-      commit({
-        ...dataRef.current,
-        readings: journalUid ? [] : [result, ...dataRef.current.readings],
+      commit((current) => ({
+        ...current,
+        readings: journalUid
+          ? []
+          : [result, ...current.readings.filter((item) => item.id !== result.id)],
         activeId: result.id,
         awaitingNewReading: true,
-      });
+      }));
       setCopied(false);
     } catch (cause) {
       drawLocked.current = false;
@@ -289,15 +455,15 @@ function JournalSession({
     }
   };
   const reveal = (index?: number) => {
-    const current = dataRef.current;
     if (journalUid && reading) {
       account.reveal(reading.id, index === undefined ? reading.cards.map((_, i) => i) : [index]);
       return;
     }
-    commit({
+    if (!reading) return;
+    commit((current) => ({
       ...current,
       readings: current.readings.map((item) =>
-        item.id === current.activeId
+        item.id === reading.id && sameReadingContent(item, reading)
           ? {
               ...item,
               revealed: item.revealed.map(
@@ -306,10 +472,10 @@ function JournalSession({
             }
           : item,
       ),
-    });
+    }));
   };
   const newReading = () => {
-    commit({ ...dataRef.current, activeId: null, awaitingNewReading: false });
+    commit((current) => ({ ...current, activeId: null, awaitingNewReading: false }));
     drawLocked.current = false;
     setQuestion('');
     setDetails(null);
@@ -317,7 +483,11 @@ function JournalSession({
     setError('');
   };
   const openReading = (id: string) => {
-    commit({ ...dataRef.current, activeId: id, awaitingNewReading: true });
+    commit((current) => ({
+      ...current,
+      activeId: journalUid || current.readings.some((item) => item.id === id) ? id : null,
+      awaitingNewReading: true,
+    }));
     drawLocked.current = true;
     setDetails(null);
     setCopied(false);
@@ -325,30 +495,66 @@ function JournalSession({
     navigate('/');
   };
   const deleteReadings = async () => {
-    const current = dataRef.current;
-    if (journalUid && confirmDelete) {
-      const id = confirmDelete === 'all' ? undefined : confirmDelete.id;
+    if (!confirmDelete || (uid && isJournalLocked(uid))) {
+      setConfirmDelete(null);
+      return;
+    }
+    if (journalUid) {
+      const target = confirmDelete === 'all' ? undefined : confirmDelete;
       setConfirmDelete(null);
       try {
-        await account.remove(id);
-        if (!id || dataRef.current.activeId === id) {
-          commit({ ...dataRef.current, activeId: null });
+        await account.remove(target?.id, target);
+        if (!target || dataRef.current.activeId === target.id) {
+          commit((current) => ({ ...current, activeId: null }));
         }
       } catch {
         /* The journal displays the cloud error and permits another attempt. */
       }
       return;
     }
-    const remaining =
-      confirmDelete === 'all'
-        ? []
-        : current.readings.filter((item) => item.id !== confirmDelete?.id);
-    const activeId = remaining.some((item) => item.id === current.activeId)
-      ? current.activeId
-      : null;
-    commit({ ...current, readings: remaining, activeId });
-    drawLocked.current = Boolean(activeId) || current.awaitingNewReading;
+    const targets = confirmDelete === 'all' ? dataRef.current.readings : [confirmDelete];
+    const confirmed = new Map(targets.map((item) => [item.id, item]));
+    const view = dataRef.current;
+    const version = ++guestViewVersion.current;
     setConfirmDelete(null);
+    await withGuestWrite(
+      () => {
+        const stored = loadData(view);
+        const latest = guestDraft.current ? { data: guestDraft.current.data, warning: '' } : stored;
+        if (latest.warning) {
+          setWarning(
+            'The saved journal could not be read. Restore storage access and confirm the deletion again.',
+          );
+          return;
+        }
+        const matches = (item: Reading) => {
+          const target = confirmed.get(item.id);
+          return target !== undefined && sameReadingContent(item, target);
+        };
+        if (confirmDelete !== 'all' && !latest.data.readings.some(matches)) {
+          if (version === guestViewVersion.current) {
+            showData(latest.data);
+            drawLocked.current = Boolean(latest.data.activeId) || latest.data.awaitingNewReading;
+          }
+          setWarning('This reading changed in another tab. Review the journal and confirm again.');
+          return;
+        }
+        const removeConfirmed = (current: AppData) => {
+          const remaining = current.readings.filter((item) => !matches(item));
+          const activeId = remaining.some((item) => item.id === current.activeId)
+            ? current.activeId
+            : null;
+          return { ...current, readings: remaining, activeId };
+        };
+        const issue = saveGuestChange(stored, removeConfirmed, removeConfirmed(view), version);
+        if (!issue && confirmDelete === 'all' && dataRef.current.readings.length)
+          setWarning('Readings added or replaced in another tab were kept.');
+      },
+      () =>
+        setWarning(
+          'This browser could not coordinate the deletion with other tabs. Restore browser storage access and confirm again.',
+        ),
+    );
   };
   const copyReading = async () => {
     if (!reading) return;
@@ -721,7 +927,7 @@ function JournalSession({
                 hasMore={Boolean(journalUid && account.hasMore)}
                 onLoadMore={account.loadMore}
                 onOpen={openReading}
-                onRequestDelete={(id) => setConfirmDelete({ id })}
+                onRequestDelete={setConfirmDelete}
                 onRequestClear={() => setConfirmDelete('all')}
               >
                 <AccountPanel
@@ -729,12 +935,17 @@ function JournalSession({
                   user={user}
                   syncStatus={account.status}
                   signOutDisabled={account.pending}
+                  onLock={account.trusted && journalUid ? () => lockJournal(journalUid) : undefined}
                 />
                 <JournalTransfer
                   accountEmail={journalUid ? (user?.email ?? null) : null}
                   recoveryReadings={account.recoveryReadings}
+                  deletionStorageUnreadable={account.deletionStorageUnreadable}
+                  recoveryComplete={account.recoveryComplete}
+                  getRecoveryForExport={account.getRecoveryForExport}
+                  savedRecovery={account.savedRecovery}
                   deviceCount={deviceCount}
-                  getDeviceReadings={() => deviceJournal().readings}
+                  getDeviceReadings={guestReadingsForTransfer}
                   onExport={exportJournal}
                   onPreview={previewImport}
                   onImport={importJournal}
@@ -854,6 +1065,11 @@ function JournalSession({
           title={confirmDelete === 'all' ? 'Clear your journal?' : 'Delete this reading?'}
           onClose={() => setConfirmDelete(null)}
         >
+          {confirmDelete !== 'all' && (
+            <p>
+              {confirmDelete.question || 'An open reading'} · {dateLabel(confirmDelete.createdAt)}
+            </p>
+          )}
           <p>
             {journalUid
               ? confirmDelete === 'all'

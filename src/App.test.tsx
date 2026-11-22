@@ -6,6 +6,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import App from './App';
 import { CARD_BY_ID, DECK } from './data/deck';
 import { STORAGE_KEY, RECOVERY_KEY, type AppData } from './domain/storage';
+import { captureBackup } from './test/captureBackup';
+import { webcrypto } from 'node:crypto';
 
 vi.mock('./pwa', () => ({ subscribeOfflineStatus: () => () => {} }));
 vi.mock('./cloud/journal', () => ({
@@ -206,7 +208,7 @@ describe('drawing and revisiting a reading', () => {
     const random = useSecureSamples();
     renderApp(<App />);
     const form = drawButton().closest('form')!;
-    act(() => {
+    await act(async () => {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
@@ -279,15 +281,7 @@ describe('reading recovery and journal controls', () => {
     const failedWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Quota exceeded', 'QuotaExceededError');
     });
-    const createObjectURL = vi.fn<(_blob: Blob) => string>().mockReturnValue('blob:journal-test');
-    vi.stubGlobal(
-      'URL',
-      class extends URL {
-        static createObjectURL = createObjectURL;
-        static revokeObjectURL = vi.fn();
-      },
-    );
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const backup = captureBackup();
     renderApp(<App />);
     await user.click(drawButton());
     expect(screen.getByRole('alert')).toHaveTextContent(
@@ -304,15 +298,8 @@ describe('reading recovery and journal controls', () => {
     expect(await screen.findByRole('link', { name: 'Download backup' })).toHaveAttribute(
       'download',
     );
-    const [blob] = createObjectURL.mock.calls[0];
-    const json = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(blob);
-    });
     expect(session.readings).toHaveLength(1);
-    expect(JSON.parse(json)).toEqual({ version: 1, readings: session.readings });
+    expect(await backup()).toEqual({ version: 1, readings: session.readings });
     await user.click(screen.getByRole('button', { name: /^Open reading:/ }));
     expect(
       screen
@@ -321,6 +308,91 @@ describe('reading recovery and journal controls', () => {
     ).toEqual(names);
     expect(random).toHaveBeenCalledTimes(77);
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('preserves a sibling draw when the next guest storage read fails once', async () => {
+    const user = userEvent.setup();
+    const backup = captureBackup();
+    const first = within(renderApp(<App />).container);
+    const sibling = within(renderApp(<App />).container);
+    await user.type(sibling.getByRole('textbox'), 'Sibling draw');
+    await user.click(sibling.getByRole('button', { name: /Draw Cards/ }));
+    const saved = stored();
+    await user.type(first.getByRole('textbox'), 'First tab draw');
+    const get = Storage.prototype.getItem;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (
+      this: Storage,
+      key: string,
+    ) {
+      if (key === STORAGE_KEY) {
+        read.mockRestore();
+        throw new DOMException('Storage unavailable', 'SecurityError');
+      }
+      return get.call(this, key);
+    });
+    await user.click(first.getByRole('button', { name: /Draw Cards/ }));
+    expect(first.getByRole('alert')).toHaveTextContent('still available in this session');
+    expect(stored()).toEqual(saved);
+    await user.click(first.getByRole('link', { name: /^Journal/ }));
+    await user.click(first.getByRole('button', { name: 'Export journal' }));
+    await first.findByRole('link', { name: 'Download backup' });
+    const file = await backup();
+    expect(file.readings).toHaveLength(2);
+    expect(file.readings).toContainEqual(saved.readings[0]);
+    expect(file.readings.some((reading) => reading.question === 'First tab draw')).toBe(true);
+  });
+
+  it('keeps the open spread usable after another guest tab starts a new reading', async () => {
+    const user = userEvent.setup();
+    const first = within(renderApp(<App />).container);
+    await user.click(first.getByRole('button', { name: /Draw Cards/ }));
+    const original = stored().readings[0];
+    const second = within(renderApp(<App />).container);
+    await user.click(second.getByRole('button', { name: 'New Reading' }));
+    await user.click(first.getByRole('button', { name: 'Reveal card 1' }));
+    expect(first.getAllByRole('button', { name: /View card details/ })).toHaveLength(1);
+    expect(second.getByRole('button', { name: /Draw Cards/ })).toBeEnabled();
+    expect(stored().readings[0]).toEqual({ ...original, revealed: [true, false, false] });
+    await user.click(first.getByRole('button', { name: 'New Reading' }));
+    await user.click(first.getByRole('button', { name: /Draw Cards/ }));
+    expect(stored().readings).toHaveLength(2);
+  });
+
+  it('restores a guest reveal alongside a separately imported copy without restoring a sibling deletion', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('crypto', webcrypto);
+    const backup = captureBackup();
+    const view = renderApp(<App />);
+    await user.type(screen.getByLabelText(/What’s on your mind/), 'Delete in the other tab');
+    await user.click(drawButton());
+    await user.click(screen.getByRole('button', { name: 'New Reading' }));
+    await user.click(drawButton());
+    const original = stored();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    await user.click(screen.getByRole('button', { name: 'Reveal card 2' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Your cards are still available');
+    const sibling = { ...original.readings[0], id: 'import-' + 'a'.repeat(64) };
+    const persisted = { ...original, readings: [sibling], activeId: sibling.id };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+    await user.click(journalButton());
+    await user.click(screen.getByRole('button', { name: 'Export journal' }));
+    expect(await screen.findByRole('link', { name: 'Download backup' })).toBeVisible();
+    const file = await backup();
+    const edited = { ...original.readings[0], revealed: [false, true, false] };
+    expect(file.readings).toHaveLength(2);
+    expect(file.readings).toEqual(expect.arrayContaining([sibling, edited]));
+    expect(stored()).toEqual(persisted);
+    view.unmount();
+    renderApp(<App />, '/journal');
+    await user.upload(
+      screen.getByLabelText('Journal backup file'),
+      new File([JSON.stringify(file)], 'guest.json', { type: 'application/json' }),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Confirm import' }));
+    expect(stored().readings).toHaveLength(2);
+    expect(stored().readings).toEqual(expect.arrayContaining([sibling, edited]));
   });
 
   it('preserves unreadable storage on export and import and still allows a new draw', async () => {

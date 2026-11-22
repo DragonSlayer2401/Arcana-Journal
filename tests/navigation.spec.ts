@@ -38,6 +38,7 @@ test('account forms open at their own URLs and preserve the guest journal throug
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const original = await savedData(page);
   const header = page.getByRole('banner');
   await expect(header.getByRole('link', { name: 'Create account' })).toHaveAttribute(
@@ -70,6 +71,7 @@ test('back, forward and offline route refresh preserve one exact saved reading a
   await page.getByRole('checkbox', { name: /Include reversals/ }).check();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
+  await expect(page.getByRole('button', { name: /View card details/ })).toBeVisible();
   const original = await savedData(page);
   expect(original.readings).toHaveLength(1);
   expect(original.readings[0].revealed).toEqual([true, false, false]);

@@ -61,16 +61,22 @@ const parseSavedData = (raw: string): AppData => {
 // Most writes follow a successful read or write in this tab. Recheck the shape
 // when another tab (including a newer app version) has replaced the value.
 let lastValidRaw: string | null = null;
-export const loadData = (): { data: AppData; warning: string } => {
+export const guestSaveWarning =
+  'This device could not save your reading or settings. Your cards are still available in this session. Open Journal and choose Export journal before leaving.';
+export const loadData = (
+  fallback?: AppData,
+): { data: AppData; warning: string; storageUnavailable?: boolean } => {
+  let raw: string | null | undefined;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) return { data: freshData(), warning: '' };
     const data = parseSavedData(raw);
     lastValidRaw = raw;
     return { data, warning: '' };
   } catch {
     return {
-      data: freshData(),
+      data: fallback ?? freshData(),
+      storageUnavailable: raw === undefined,
       warning:
         'Saved data could not be read. You can still draw here. If you have a journal backup, you can import it in another browser.',
     };
@@ -102,7 +108,7 @@ export const saveData = (data: AppData): string => {
     lastValidRaw = raw;
     return '';
   } catch {
-    return 'This device could not save your reading or settings. Your cards are still available in this session. Open Journal and choose Export journal before leaving.';
+    return guestSaveWarning;
   }
 };
 export const formatReading = (reading: Reading): string =>

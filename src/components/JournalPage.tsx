@@ -7,7 +7,7 @@ import { Icon } from './Icons';
 interface Props {
   readings: Reading[];
   onOpen: (id: string) => void;
-  onRequestDelete: (id: string) => void;
+  onRequestDelete: (reading: Reading) => void;
   onRequestClear: () => void;
   account: boolean;
   loading?: boolean;
@@ -94,7 +94,7 @@ export const JournalPage = ({
               <button
                 className="icon-button delete-button"
                 aria-label={`Delete reading: ${item.question || 'Open reading'}`}
-                onClick={() => onRequestDelete(item.id)}
+                onClick={() => onRequestDelete(item)}
               >
                 <Icon name="trash" />
               </button>

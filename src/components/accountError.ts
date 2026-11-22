@@ -1,11 +1,14 @@
-export const accountError = (cause: unknown): string => {
+export const accountError = (
+  cause: unknown,
+  credentialMessage = 'Check your email address and password and try again.',
+): string => {
   const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : '';
   switch (code) {
     case 'auth/user-not-found':
     case 'auth/wrong-password':
     case 'auth/invalid-login-credentials':
     case 'auth/invalid-credential':
-      return 'Check your email address and password and try again.';
+      return credentialMessage;
     case 'auth/email-already-in-use':
       return 'This email already has an account. Sign in or reset your password.';
     case 'auth/invalid-email':

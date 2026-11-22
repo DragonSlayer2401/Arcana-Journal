@@ -11,6 +11,72 @@ const importFile = async (page: Page, file: Parameters<FileChooser['setFiles']>[
   await (await chooser).setFiles(file);
 };
 
+for (const single of [true, false]) {
+  test(`guest ${single ? 'deletion' : 'clear'} preserves a new draw in another tab and its next reveal`, async ({
+    page,
+    context,
+  }) => {
+    await page.goto('/');
+    await page.getByLabel(/What’s on your mind/).fill('First spread');
+    await page.getByRole('button', { name: /Draw Cards/ }).click();
+    await page.getByRole('link', { name: /^Journal/ }).click();
+    await page
+      .getByRole('button', { name: single ? 'Delete reading: First spread' : 'Clear History' })
+      .click();
+
+    const sibling = await context.newPage();
+    await sibling.goto('/');
+    await sibling.getByRole('button', { name: 'New Reading' }).click();
+    await sibling.getByLabel(/What’s on your mind/).fill('Later spread');
+    await sibling.getByRole('button', { name: /Draw Cards/ }).click();
+    await expect(sibling.getByRole('button', { name: 'Reveal card 1' })).toBeVisible();
+    const later = (await savedJournal(sibling)).readings[0];
+
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: single ? 'Delete Reading' : 'Clear All Readings' })
+      .click();
+    await expect(page.getByRole('heading', { name: 'Later spread' })).toBeVisible();
+    expect((await savedJournal(page)).readings).toEqual([later]);
+    await sibling.getByRole('button', { name: 'Reveal card 1' }).click();
+    await expect(sibling.getByRole('button', { name: /View card details/ })).toBeVisible();
+    expect((await savedJournal(sibling)).readings).toEqual([
+      { ...later, revealed: [true, false, false] },
+    ]);
+  });
+}
+
+test('a stale guest confirmation keeps a replacement with the same ID', async ({
+  page,
+  context,
+}) => {
+  await page.goto('/');
+  await page.getByLabel(/What’s on your mind/).fill('Original spread');
+  await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await page.getByRole('link', { name: /^Journal/ }).click();
+  await page.getByRole('button', { name: 'Delete reading: Original spread' }).click();
+  const sibling = await context.newPage();
+  await sibling.goto('/journal');
+  const replacement = {
+    ...(await savedJournal(sibling)).readings[0],
+    question: 'Replacement spread',
+  };
+  await sibling.getByRole('button', { name: 'Clear History' }).click();
+  await sibling.getByRole('button', { name: 'Clear All Readings' }).click();
+  await expect(sibling.getByRole('heading', { name: 'A fresh page awaits.' })).toBeVisible();
+  await importFile(sibling, {
+    name: 'replacement.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ version: 1, readings: [replacement] })),
+  });
+  await sibling.getByRole('button', { name: 'Confirm import' }).click();
+  await expect(sibling.getByRole('heading', { name: replacement.question })).toBeVisible();
+
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete Reading' }).click();
+  await expect(page.getByText(/This reading changed in another tab/)).toBeVisible();
+  expect((await savedJournal(page)).readings).toEqual([replacement]);
+});
+
 test('a guest can export the whole journal offline and restore a partially revealed spread', async ({
   page,
   context,
@@ -27,6 +93,7 @@ test('a guest can export the whole journal offline and restore a partially revea
   await page.getByRole('button', { name: 'New Reading' }).click();
   await page.getByRole('button', { name: /One card/ }).click();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const original = await savedJournal(page);
   expect(original.readings).toHaveLength(2);
   expect(original.readings[1].revealed).toEqual([false, true, false]);
@@ -51,6 +118,7 @@ test('a guest can export the whole journal offline and restore a partially revea
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(2);
   await importFile(page, backup);
   await page.getByRole('button', { name: 'Confirm import' }).click();
+  await expect(page.getByRole('dialog', { name: 'Review journal import' })).toHaveCount(0);
   await expect(page.getByRole('status')).toContainText(/skipped 2/i);
   await page.reload();
   const restored = await savedJournal(page);
@@ -68,6 +136,7 @@ test('a rejected file leaves the journal intact and a corrected file merges with
   await page.goto('/');
   await page.getByLabel(/What’s on your mind/).fill('A reading already on this device');
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const existing = await savedJournal(page);
   await page.getByRole('link', { name: /^Journal/ }).click();
 
@@ -120,6 +189,7 @@ test('a failed storage write leaves both journals intact and the same backup can
 }) => {
   await page.goto('/');
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const existing = await savedJournal(page);
   const incoming = { ...existing.readings[0], id: 'from-another-device', question: 'A new idea' };
   const backup = {

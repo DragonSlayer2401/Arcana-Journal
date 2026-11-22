@@ -4,14 +4,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import * as journal from './cloud/journal';
+import * as journalActivity from './cloud/journalActivity';
 import { freshData, STORAGE_KEY } from './domain/storage';
 import type { Reading } from './domain/types';
+import { captureBackup } from './test/captureBackup';
 
 vi.mock('./pwa', () => ({ subscribeOfflineStatus: () => () => {} }));
 vi.mock('./cloud/journal', () => ({
   observeAccount: vi.fn(),
   observeReadings: vi.fn(),
   observeReading: vi.fn(),
+  observePendingDeletions: vi.fn(),
+  readDeletionTarget: vi.fn(),
   signIn: vi.fn(),
   signOutAccount: vi.fn(),
   signUp: vi.fn(),
@@ -19,11 +23,21 @@ vi.mock('./cloud/journal', () => ({
   refreshAccount: vi.fn(),
   sendVerification: vi.fn(),
   isOfflineJournalEnabled: vi.fn(),
+  isJournalLocked: vi.fn(),
+  isJournalLockedInThisTabOnly: () => false,
+  observeJournalLock: vi.fn(),
+  lockJournal: vi.fn(),
+  unlockJournal: vi.fn(),
   createReading: vi.fn(),
   revealCards: vi.fn(),
   removeReading: vi.fn(),
   clearReadings: vi.fn(),
+  withClearPreparation: (
+    uid: string,
+    prepare: Parameters<typeof journal.withClearPreparation>[1],
+  ) => prepare((submitted) => journal.clearReadings(uid, submitted)),
   exportAccountJournal: vi.fn(),
+  checkReadingsForPendingDeletions: vi.fn(),
   previewAccountImport: vi.fn(),
   importAccountReadings: vi.fn(),
 }));
@@ -85,6 +99,9 @@ beforeEach(() => {
   records.set(firstUser.uid, [firstReading]);
   records.set(nextUser.uid, [nextReading]);
   signedIn = null;
+  cloud.isJournalLocked.mockReturnValue(false);
+  cloud.observeJournalLock.mockImplementation(() => () => {});
+  cloud.observePendingDeletions.mockImplementation(() => () => {});
   cloud.observeAccount.mockImplementation((listener) => {
     accountListener = listener;
     listener(signedIn);
@@ -234,6 +251,51 @@ describe('account journal workflows', () => {
     expect(screen.queryByRole('heading', { name: deviceReading.question })).toBeNull();
   });
 
+  it('downloads and previews unsaved guest changes after signing in even when another tab changed the journal', async () => {
+    const user = userEvent.setup();
+    const backup = captureBackup();
+    cloud.previewAccountImport.mockResolvedValue({ added: 2, updated: 0, skipped: 0 });
+    const sibling = reading('sibling', 'Saved in another guest tab');
+    try {
+      mount();
+      await user.click(screen.getByRole('button', { name: /^Open reading:/ }));
+      const rejectWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      });
+      await user.click(screen.getByRole('button', { name: 'Reveal card 1' }));
+      expect(
+        await screen.findByText(/your cards are still available in this session/i),
+      ).toBeVisible();
+      rejectWrite.mockRestore();
+      const saved = JSON.stringify({ ...freshData(), readings: [sibling] });
+      localStorage.setItem(STORAGE_KEY, saved);
+      act(() => setAccount(firstUser));
+      await goToJournal(user);
+      await user.click(screen.getByRole('button', { name: 'Download guest backup' }));
+      expect(await screen.findByRole('link', { name: 'Download backup' })).toHaveAttribute(
+        'download',
+        expect.stringContaining('-guest-'),
+      );
+      const file = await backup();
+      const edited = { ...deviceReading, revealed: [true, true] };
+      expect(file.readings).toHaveLength(2);
+      expect(file.readings).toEqual(expect.arrayContaining([edited, sibling]));
+      expect(cloud.exportAccountJournal).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: /Import this device/ }));
+      const dialog = within(await screen.findByRole('dialog', { name: 'Review journal import' }));
+      expect(dialog.getByText(firstUser.email)).toBeVisible();
+      expect(cloud.previewAccountImport.mock.lastCall?.slice(0, 2)).toEqual([
+        firstUser.uid,
+        file.readings,
+      ]);
+      expect(cloud.importAccountReadings).not.toHaveBeenCalled();
+      expect(localStorage.getItem(STORAGE_KEY)).toBe(saved);
+    } finally {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('draws into the account, restores a remote reveal in a second session, and deletes across devices', async () => {
     const user = userEvent.setup();
     const guestBefore = localStorage.getItem(STORAGE_KEY);
@@ -241,11 +303,11 @@ describe('account journal workflows', () => {
     cloud.createReading.mockImplementation(async (uid, entry) =>
       publish(uid, [entry, ...records.get(uid)!]),
     );
-    cloud.revealCards.mockImplementation(async (uid, id, indexes) => {
+    cloud.revealCards.mockImplementation(async (uid, reading, indexes) => {
       publish(
         uid,
         records.get(uid)!.map((entry) =>
-          entry.id === id
+          entry.id === reading.id
             ? {
                 ...entry,
                 revealed: entry.revealed.map((shown, index) => shown || indexes.includes(index)),
@@ -254,10 +316,10 @@ describe('account journal workflows', () => {
         ),
       );
     });
-    cloud.removeReading.mockImplementation(async (uid, id) =>
+    cloud.removeReading.mockImplementation(async (uid, target) =>
       publish(
         uid,
-        records.get(uid)!.filter((entry) => entry.id !== id),
+        records.get(uid)!.filter((entry) => entry.id !== target.id),
       ),
     );
     const app = mount('/');
@@ -267,7 +329,7 @@ describe('account journal workflows', () => {
     expect(uid).toBe(firstUser.uid);
     expect(drawn.revealed).toEqual([false, false, false]);
     await user.click(screen.getByRole('button', { name: 'Reveal card 1' }));
-    expect(cloud.revealCards).toHaveBeenCalledWith(uid, drawn.id, [0]);
+    expect(cloud.revealCards).toHaveBeenCalledWith(uid, drawn, [0]);
     expect(screen.getAllByRole('button', { name: /View card details/ })).toHaveLength(1);
     app.unmount();
     sessionStorage.clear(); // Another tab starts with its own current spread.
@@ -287,49 +349,132 @@ describe('account journal workflows', () => {
     const dialog = within(screen.getByRole('dialog', { name: 'Delete this reading?' }));
     expect(dialog.getByText(/every synced device/)).toBeVisible();
     await user.click(dialog.getByRole('button', { name: 'Delete Reading' }));
-    expect(cloud.removeReading).toHaveBeenCalledWith(uid, drawn.id);
+    expect(cloud.removeReading).toHaveBeenCalledWith(uid, remote);
     expect(screen.queryByRole('heading', { name: drawn.question })).toBeNull();
     expect(localStorage.getItem(STORAGE_KEY)).toBe(guestBefore);
   });
 
-  it('requests the complete account backup while the journal is showing only the first page', async () => {
+  it('dismisses a pending delete when a sibling locks the journal', async () => {
     const user = userEvent.setup();
     signedIn = firstUser;
-    const readings = Array.from({ length: 51 }, (_, index) =>
-      reading('entry-' + index, 'Reading ' + index),
+    let lockChanged!: () => void;
+    cloud.observeJournalLock.mockImplementation((_uid, notify) => {
+      lockChanged = notify;
+      return () => {};
+    });
+    mount();
+    await user.click(
+      screen.getByRole('button', { name: 'Delete reading: ' + firstReading.question }),
     );
-    records.set(firstUser.uid, readings);
-    cloud.exportAccountJournal.mockResolvedValue(JSON.stringify({ version: 1, readings }));
-    const createURL = vi.fn((_file: Blob) => 'blob:account-export');
-    vi.stubGlobal(
-      'URL',
-      class extends URL {
-        static createObjectURL = createURL;
-        static revokeObjectURL = vi.fn();
-      },
+    expect(screen.getByRole('dialog')).toHaveTextContent(firstReading.question);
+    act(() => {
+      cloud.isJournalLocked.mockReturnValue(true);
+      lockChanged();
+    });
+    expect(screen.getByRole('heading', { name: 'Journal locked' })).toBeVisible();
+    const replacement = { ...firstReading, question: 'Another reading at the original ID' };
+    act(() => {
+      publish(firstUser.uid, [replacement]);
+      cloud.isJournalLocked.mockReturnValue(false);
+      lockChanged();
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('heading', { name: replacement.question })).toBeVisible();
+    expect(cloud.removeReading).not.toHaveBeenCalled();
+  });
+
+  it('requires a new confirmation when the selected reading is replaced while the dialog is open', async () => {
+    const user = userEvent.setup();
+    signedIn = firstUser;
+    mount();
+    await user.click(
+      screen.getByRole('button', { name: 'Delete reading: ' + firstReading.question }),
     );
-    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const updated = { ...firstReading, revealed: [true, true] };
+    act(() => publish(firstUser.uid, [updated]));
+    expect(screen.getByRole('dialog', { name: 'Delete this reading?' })).toBeVisible();
+    const replacement = { ...firstReading, question: 'Replacement under the same ID' };
+    act(() => publish(firstUser.uid, [replacement]));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(cloud.removeReading).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole('button', { name: 'Delete reading: ' + replacement.question }),
+    );
+    expect(screen.getByRole('dialog')).toHaveTextContent(replacement.question);
+  });
+
+  it.each(['clear', 'unknown'] as const)(
+    'exports every page and labels the file when sibling activity is %s',
+    async (siblingState) => {
+      const user = userEvent.setup();
+      signedIn = firstUser;
+      const checkOtherTabs = vi
+        .spyOn(journalActivity, 'checkSiblingRecovery')
+        .mockResolvedValue(siblingState);
+      const readings = Array.from({ length: 51 }, (_, index) =>
+        reading('entry-' + index, 'Reading ' + index),
+      );
+      records.set(firstUser.uid, readings);
+      cloud.exportAccountJournal.mockResolvedValue(JSON.stringify({ version: 1, readings }));
+      const createURL = vi.fn((_file: Blob) => 'blob:account-export');
+      vi.stubGlobal(
+        'URL',
+        class extends URL {
+          static createObjectURL = createURL;
+          static revokeObjectURL = vi.fn();
+        },
+      );
+      const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        mount();
+        expect(screen.queryByRole('heading', { name: 'Reading 50' })).toBeNull();
+        await user.click(screen.getByRole('button', { name: 'Export journal' }));
+        expect(await screen.findByRole('link', { name: 'Download backup' })).toHaveAttribute(
+          'href',
+          'blob:account-export',
+        );
+        expect(cloud.exportAccountJournal).toHaveBeenCalledWith(firstUser.uid, false);
+        const filename = screen
+          .getByRole('link', { name: 'Download backup' })
+          .getAttribute('download');
+        expect(filename).toContain('cloud-and-this-tab');
+        expect(screen.getByText(/Other tabs may have unsynced readings/)).toBeVisible();
+        const blob = createURL.mock.calls[0][0];
+        const json = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.readAsText(blob);
+        });
+        expect(JSON.parse(json).readings).toEqual(readings);
+        await user.click(screen.getByRole('button', { name: 'Load older readings' }));
+        expect(screen.getByRole('heading', { name: 'Reading 50' })).toBeVisible();
+      } finally {
+        checkOtherTabs.mockRestore();
+        download.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it('stops the download if another tab acquires unsynced readings during export', async () => {
+    const user = userEvent.setup();
+    signedIn = firstUser;
+    const checkOtherTabs = vi
+      .spyOn(journalActivity, 'checkSiblingRecovery')
+      .mockResolvedValueOnce('clear')
+      .mockResolvedValueOnce('busy');
+    cloud.exportAccountJournal.mockResolvedValue(
+      JSON.stringify({ version: 1, readings: [firstReading] }),
+    );
     try {
       mount();
-      expect(screen.queryByRole('heading', { name: 'Reading 50' })).toBeNull();
       await user.click(screen.getByRole('button', { name: 'Export journal' }));
-      expect(await screen.findByRole('link', { name: 'Download backup' })).toHaveAttribute(
-        'href',
-        'blob:account-export',
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        /another tab has unsynced journal changes/i,
       );
-      expect(cloud.exportAccountJournal).toHaveBeenCalledWith(firstUser.uid);
-      const blob = createURL.mock.calls[0][0];
-      const json = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.readAsText(blob);
-      });
-      expect(JSON.parse(json).readings).toEqual(readings);
-      await user.click(screen.getByRole('button', { name: 'Load older readings' }));
-      expect(screen.getByRole('heading', { name: 'Reading 50' })).toBeVisible();
+      expect(screen.queryByRole('link', { name: 'Download backup' })).toBeNull();
     } finally {
-      download.mockRestore();
-      vi.unstubAllGlobals();
+      checkOtherTabs.mockRestore();
     }
   });
 });

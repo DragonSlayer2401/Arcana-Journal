@@ -181,7 +181,43 @@ describe('portable journal backups', () => {
     const retry = await mergeJournalReadings(readings, [incoming]);
     expect(retry.readings).toBe(readings);
     expect(retry.skipped).toBe(1);
+    const afterDelete = readings.filter((r) => r.id !== occupied.id);
+    expect((await mergeJournalReadings(afterDelete, [incoming])).readings).toBe(afterDelete);
   });
+
+  it('reuses a historical collision ID after the earlier occupants are removed', async () => {
+    const original = reading('legacy-source');
+    const prior = { ...original, id: await collisionReadingId(original, 2) };
+    const imported = await mergeJournalReadings([prior], [{ ...original, revealed: [true, true] }]);
+    expect(imported.added).toBe(0);
+    expect(imported.readings).toEqual([{ ...prior, revealed: [true, true] }]);
+  });
+
+  it('keeps an ambiguous historical collision for explicit review', async () => {
+    const original = reading('legacy-source');
+    const prior = { ...original, id: await collisionReadingId(original, 73) };
+    await expect(mergeJournalReadings([prior], [original])).rejects.toThrow(
+      /original ID could not be verified/,
+    );
+  });
+
+  it.each([false, true])(
+    'round trips two explicitly distinct backup rows, alternate first: %s',
+    async (alternateFirst) => {
+      const original = reading('portable-legacy-pair');
+      const alternate = {
+        ...original,
+        id: await collisionReadingId(original, 73),
+        revealed: [true, false],
+      };
+      const rows = alternateFirst ? [alternate, original] : [original, alternate];
+      const backup = await createJournalBackup(() => ({ readings: rows, nextCursor: null }));
+      const restored = await mergeJournalReadings([], parseJournalBackup(backup));
+      expect(restored.added).toBe(2);
+      expect(restored.readings).toEqual(rows);
+      expect((await mergeJournalReadings(restored.readings, rows)).readings).toEqual(rows);
+    },
+  );
 
   it('flags large files for confirmation before reading them', () => {
     expect(backupNeedsSizeConfirmation(64 * 1024 * 1024)).toBe(false);

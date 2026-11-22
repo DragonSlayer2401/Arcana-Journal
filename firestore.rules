@@ -1,11 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function verifiedOwner(userId) {
+      return request.auth != null && request.auth.uid == userId
+        && request.auth.token.email_verified == true;
+    }
+    match /users/{userId}/journalOperations/clear {
+      allow get: if verifiedOwner(userId);
+      allow create, update: if verifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['token', 'active'])
+        && request.resource.data.active is bool
+        && request.resource.data.token is string
+        && request.resource.data.token.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
     match /users/{userId}/readings/{readingId} {
-      function verifiedOwner() {
-        return request.auth != null && request.auth.uid == userId
-          && request.auth.token.email_verified == true;
-      }
       function knownCards(cards) {
         return cards.hasOnly([
           'major-00', 'major-01', 'major-02', 'major-03',
@@ -50,9 +58,9 @@ service cloud.firestore {
           && r.orientations.hasOnly(['upright','reversed'])
           && validReveals(r.revealedSlots, r.cardIds.size());
       }
-      allow read, delete: if verifiedOwner();
-      allow create: if verifiedOwner() && validReading(request.resource.data);
-      allow update: if verifiedOwner()
+      allow read, delete: if verifiedOwner(userId);
+      allow create: if verifiedOwner(userId) && validReading(request.resource.data);
+      allow update: if verifiedOwner(userId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revealedSlots'])
         && validReveals(request.resource.data.revealedSlots, resource.data.cardIds.size())
         && request.resource.data.revealedSlots.hasAll(resource.data.revealedSlots);

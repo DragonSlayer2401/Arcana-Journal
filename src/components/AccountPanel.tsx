@@ -13,9 +13,10 @@ interface Props {
   user: JournalUser | null;
   syncStatus?: string;
   signOutDisabled?: boolean;
+  onLock?: () => Promise<void>;
 }
 
-export const AccountPanel = ({ user, syncStatus, signOutDisabled }: Props) => {
+export const AccountPanel = ({ user, syncStatus, signOutDisabled, onLock }: Props) => {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -47,11 +48,20 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled }: Props) => {
           </p>
         </div>
         <div className="account-actions">
+          {onLock && (
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() => void run(onLock)}
+            >
+              Lock journal
+            </button>
+          )}
           {user ? (
             <button
               className="button button-secondary"
               disabled={busy || signOutDisabled}
-              onClick={() => void run(signOutAccount)}
+              onClick={() => void run(() => signOutAccount(user.uid))}
             >
               Sign out
             </button>
@@ -67,6 +77,12 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled }: Props) => {
           )}
         </div>
       </div>
+      {onLock && (
+        <p>
+          You can lock offline while changes wait to sync. Reconnect and enter your password to
+          unlock.
+        </p>
+      )}
       {user && !user.emailVerified && (
         <div className="account-verification">
           <p>
