@@ -47,6 +47,7 @@ test('a cached update waits for all app windows to close and preserves the exact
   await page.getByLabel(/What’s on your mind/).fill('A reading that outlasts an update');
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await page.getByRole('button', { name: 'Reveal card 1' }).click();
+  await expect(page.getByRole('button', { name: /View card details/ })).toBeVisible();
   const original = await savedData(page);
   expect(original.readings[0].revealed).toEqual([true, false, false]);
 

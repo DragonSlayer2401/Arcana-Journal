@@ -55,6 +55,7 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
     .getByLabel('What’s on your mind?', { exact: false })
     .fill('What deserves a little more attention?');
   await page.getByRole('button', { name: /Draw Cards/ }).dblclick();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const original = (await saved(page)).readings[0];
   expect((await saved(page)).readings).toHaveLength(1);
   expect(original.cards).toHaveLength(3);
@@ -63,7 +64,10 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
   await page.getByRole('button', { name: /View card details/ }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
-  await page.getByRole('navigation').getByRole('link', { name: /^Journal/ }).click();
+  await page
+    .getByRole('navigation')
+    .getByRole('link', { name: /^Journal/ })
+    .click();
   await page.getByRole('button', { name: /^Open reading:/ }).click();
   await page.reload();
   expect((await saved(page)).readings[0].cards).toEqual(original.cards);
@@ -89,6 +93,7 @@ test('cached app reloads offline and makes fresh local pulls with meanings', asy
   await page.reload();
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   const reading = (await saved(page)).readings[0];
   await page.getByRole('button', { name: 'Reveal All' }).click();
   await page
@@ -102,6 +107,7 @@ test('cached app reloads offline and makes fresh local pulls with meanings', asy
   await page.getByRole('button', { name: 'New Reading' }).click();
   await page.getByRole('button', { name: /One card/ }).click();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   expect((await saved(page)).readings).toHaveLength(2);
   expect((await saved(page)).readings[0].cards).toHaveLength(1);
 });
@@ -130,7 +136,7 @@ test('offline readiness detects a lost asset and repairs it when back online', a
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
 });
 
-test('small screens fit a ten-card reversed spread and respect reduced motion', async ({
+test('small screens instantly reveal a ten-card spread with reversals and respect reduced motion', async ({
   page,
 }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -143,8 +149,8 @@ test('small screens fit a ten-card reversed spread and respect reduced motion', 
   await page.getByRole('button', { name: /Custom/ }).click();
   await page.getByRole('combobox', { name: 'Number of cards' }).selectOption('10');
   await page.getByRole('checkbox', { name: /Include reversals/ }).check();
+  await page.getByRole('checkbox', { name: /Reveal cards instantly/ }).check();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
-  await page.getByRole('button', { name: 'Reveal All' }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(10);
   expect(
     new Set((await saved(page)).readings[0].cards.map((card: { cardId: string }) => card.cardId))

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { CARD_BY_ID } from '../data/deck';
 import type { Reading } from '../domain/types';
@@ -6,25 +7,43 @@ import { Icon } from './Icons';
 interface Props {
   readings: Reading[];
   onOpen: (id: string) => void;
-  onRequestDelete: (id: string) => void;
+  onRequestDelete: (reading: Reading) => void;
+  onRequestClear: () => void;
+  account: boolean;
+  loading?: boolean;
+  hasMore?: boolean;
+  onLoadMore: () => void;
+  children: ReactNode;
 }
 
-export const JournalPage = ({ readings, onOpen, onRequestDelete }: Props) => (
+export const JournalPage = ({
+  readings,
+  onOpen,
+  onRequestDelete,
+  onRequestClear,
+  account,
+  loading,
+  hasMore,
+  onLoadMore,
+  children,
+}: Props) => (
   <section className="journal">
     <div className="result-heading">
       <div>
-        <p className="eyebrow">KEPT CLOSE, ON THIS DEVICE</p>
+        <p className="eyebrow">{account ? 'ACCOUNT JOURNAL' : 'ON THIS DEVICE'}</p>
         <h1>Your reading journal.</h1>
-        <p>A small collection of moments and possibilities.</p>
       </div>
-      {readings.length > 0 && (
-        <button className="button button-secondary" onClick={() => onRequestDelete('all')}>
+      {(!account || readings.length > 0) && (
+        <button className="button button-secondary" onClick={onRequestClear}>
           <Icon name="trash" />
           Clear History
         </button>
       )}
     </div>
-    {readings.length === 0 ? (
+    {children}
+    {loading ? (
+      <p role="status">Loading readings…</p>
+    ) : readings.length === 0 ? (
       <div className="empty-journal">
         <Icon name="book" size={46} />
         <h2>A fresh page awaits.</h2>
@@ -75,7 +94,7 @@ export const JournalPage = ({ readings, onOpen, onRequestDelete }: Props) => (
               <button
                 className="icon-button delete-button"
                 aria-label={`Delete reading: ${item.question || 'Open reading'}`}
-                onClick={() => onRequestDelete(item.id)}
+                onClick={() => onRequestDelete(item)}
               >
                 <Icon name="trash" />
               </button>
@@ -84,8 +103,15 @@ export const JournalPage = ({ readings, onOpen, onRequestDelete }: Props) => (
         })}
       </div>
     )}
+    {hasMore && (
+      <button className="button button-secondary" onClick={onLoadMore}>
+        Load older readings
+      </button>
+    )}
     <p className="reflection-note">
-      Stored only in this browser or installed app. Clearing its data can erase your journal.
+      {account
+        ? 'Your account journal syncs across your signed-in devices.'
+        : 'Stored only in this browser or installed app. Clearing its data can erase your journal.'}
     </p>
   </section>
 );

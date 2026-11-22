@@ -140,7 +140,39 @@ select {
   border-bottom: 1px solid var(--line);
   gap: 20px;
 }
+.header-identity,
+.header-account-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.header-identity {
+  gap: 6px 24px;
+}
+.header-account-links {
+  gap: 4px;
+}
+.header-account-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 10px;
+  color: var(--gold);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+.header-account-links .header-signup {
+  border: 1px solid #d7bc8359;
+}
+.header-account-links a:hover,
+.header-account-links a.active {
+  background: #d7bc8312;
+  color: var(--gold-bright);
+}
 .wordmark {
+  min-height: 44px;
   text-decoration: none;
   display: flex;
   gap: 12px;
@@ -439,7 +471,7 @@ h1 {
   line-height: 1.6;
   margin: 9px 0 18px;
 }
-.reversal-setting {
+.reading-setting {
   display: flex;
   align-items: center;
   position: relative;
@@ -447,21 +479,21 @@ h1 {
   gap: 15px;
   cursor: pointer;
 }
-.reversal-setting > span:first-child {
+.reading-setting > span:first-child {
   flex: 1;
 }
-.reversal-setting strong {
+.reading-setting strong {
   font-size: 0.875rem;
   display: block;
   font-weight: 400;
 }
-.reversal-setting small {
+.reading-setting small {
   display: block;
   font-size: 0.75rem;
   color: #aaa2b6;
   margin-top: 5px;
 }
-.reversal-setting input {
+.reading-setting input {
   position: absolute;
   right: 0;
   top: 7px;
@@ -492,15 +524,15 @@ h1 {
     transform 0.2s,
     background 0.2s;
 }
-.reversal-setting input:checked + .switch {
+.reading-setting input:checked + .switch {
   background: #d7bc83;
   border-color: #d7bc83;
 }
-.reversal-setting input:checked + .switch:after {
+.reading-setting input:checked + .switch:after {
   transform: translateX(18px);
   background: #211b2a;
 }
-.reversal-setting input:focus-visible + .switch {
+.reading-setting input:focus-visible + .switch {
   outline: 2px solid var(--gold-bright);
   outline-offset: 4px;
 }
@@ -788,6 +820,25 @@ h1 {
   font-size: 0.8125rem;
   line-height: 1.7;
   margin: 28px 0 0;
+}
+.journal-backup {
+  margin-bottom: 24px;
+}
+.journal-backup-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.journal-backup-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.journal-backup-status:not(:empty) {
+  margin-top: 12px;
+}
+.journal-backup-status a {
+  color: var(--gold-bright);
 }
 .journal-list {
   display: grid;
@@ -1228,7 +1279,7 @@ h1 {
     font-size: 0.625rem;
   }
   .question-label,
-  .reversal-setting strong {
+  .reading-setting strong {
     font-size: 0.875rem;
   }
   .field-hint {
@@ -1442,7 +1493,7 @@ h1 {
 .draw-note,
 .field-hint,
 .question-label span,
-.reversal-setting small,
+.reading-setting small,
 .card-front-label small,
 .journal-meta,
 .journal-date span,
@@ -1455,7 +1506,7 @@ h1 {
 .mode-option strong,
 .question-label,
 .custom-count,
-.reversal-setting strong,
+.reading-setting strong,
 .principles,
 .card-underlabel,
 .reveal-bar p,
@@ -1487,10 +1538,10 @@ h1 {
   font-size: 0.75rem;
   letter-spacing: 0.13em;
 }
-.reversal-setting {
+.reading-setting {
   min-height: 68px;
 }
-.reversal-setting input {
+.reading-setting input {
   top: 0;
   width: 52px;
   height: 44px;
@@ -1571,17 +1622,38 @@ h1 {
     width: 15px;
   }
 }
-@media (max-width: 440px) {
-  .site-header {
-    justify-content: center;
-    gap: 11px;
+@media (max-width: 900px) {
+  .header-identity {
+    width: 100%;
+    justify-content: space-between;
   }
   .site-header nav {
     width: 100%;
     justify-content: center;
   }
 }
+@media (max-width: 440px) {
+  .site-header {
+    justify-content: center;
+    gap: 11px;
+  }
+  .header-identity {
+    gap: 4px;
+  }
+  .header-account-links {
+    gap: 2px;
+  }
+  .header-account-links a {
+    padding-inline: 6px;
+  }
+}
 @media (max-width: 360px) {
+  .header-identity .wordmark {
+    font-size: 1.1875rem;
+  }
+  .header-account-links a {
+    padding-inline: 3px;
+  }
   .nav-button {
     padding: 9px 16px;
   }
