@@ -90,7 +90,7 @@ for (const single of [true, false]) {
       .getByRole('button', { name: single ? 'Delete Reading' : 'Clear All Readings' })
       .click();
     await expect(page.getByRole('heading', { name: 'Later spread' })).toBeVisible();
-    expect((await savedJournal(page)).readings).toEqual([later]);
+    await expect.poll(async () => (await savedJournal(page)).readings).toEqual([later]);
     await sibling.getByRole('button', { name: 'Reveal card 1' }).click();
     await expect(sibling.getByRole('button', { name: /View card details/ })).toBeVisible();
     expect((await savedJournal(sibling)).readings).toEqual([
