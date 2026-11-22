@@ -134,8 +134,7 @@ const queueFor = (uid: string, trusted: boolean) => {
   return queue;
 };
 const notify = (queue: Queue, error?: string) => {
-  // Keep the reading visible until storing the request has completed or the
-  // browser has explicitly fallen back to memory-only processing.
+  // Advertise a request to observers once its durability is known.
   const ready = [...queue.entries.values()].filter((entry) => entry.ready);
   for (const listener of queue.listeners) listener(ready, error, queue.storageUnreadable);
 };
@@ -445,8 +444,8 @@ export const enqueueDeletion = (
         }
       }
       if (!entry.durable) {
-        // Publish before hiding the reading or dispatching the Firestore
-        // transaction. The browser releases this reservation on tab closure.
+        // Publish before dispatching the Firestore transaction. The browser
+        // releases this reservation on tab closure.
         try {
           const release = await reserveVolatileDeletion(
             await deletionReservationName(uid, reading.id),

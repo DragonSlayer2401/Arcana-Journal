@@ -947,6 +947,7 @@ for (const browserType of [chromium, webkit]) {
       await context.setOffline(true);
       await deleteFromJournal(page, original);
       await deleteFromJournal(page, other);
+      await expect(page.getByText('Changes waiting to sync.', { exact: true })).toBeVisible();
       await page.close();
 
       // A different device deletes the old spread and imports a new one at its ID.
@@ -1147,6 +1148,7 @@ test(
     await expect(reader.getByRole('button', { name: 'Lock journal' })).toHaveCount(0);
     await profile.setOffline(true);
     await deleteFromJournal(writer, reading);
+    await expect(writer.getByText('Changes waiting to sync.', { exact: true })).toBeVisible();
     await writer.close();
     await profile.setOffline(false);
 
@@ -1482,6 +1484,7 @@ test(
     await expect(writer.getByRole('heading', { name: reading.question })).toBeVisible();
     await context.setOffline(true);
     await deleteFromJournal(writer, reading);
+    await expect(writer.getByText('Changes waiting to sync.', { exact: true })).toBeVisible();
     await writer.close();
     await context.setOffline(false);
     const reopened = await context.newPage();

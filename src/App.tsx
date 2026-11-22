@@ -189,6 +189,7 @@ function JournalSession({
   const [help, setHelp] = useState(false);
   const [details, setDetails] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Reading | 'all' | null>(null);
+  const [pendingGuestDeletes, setPendingGuestDeletes] = useState<Reading[]>([]);
   const guestClearTargets = useRef<Reading[]>([]);
   const [historyRevision, setHistoryRevision] = useState(0);
   const invalidateDownloads = () => setHistoryRevision((value) => value + 1);
@@ -200,7 +201,16 @@ function JournalSession({
     'checking',
   );
   const [updateAvailable, setUpdateAvailable] = useState(false);
-  const readings = journalUid ? account.entries : data.readings;
+  const readings = journalUid
+    ? account.entries
+    : pendingGuestDeletes.length
+      ? data.readings.filter(
+          (item) =>
+            !pendingGuestDeletes.some(
+              (target) => target.id === item.id && sameReadingContent(item, target),
+            ),
+        )
+      : data.readings;
   const reading = journalUid ? account.active : readings.find((item) => item.id === data.activeId);
   const count =
     data.settings.mode === 'one'
@@ -630,6 +640,7 @@ function JournalSession({
     const confirmed = new Map(targets.map((item) => [item.id, item]));
     const view = dataRef.current;
     const version = ++guestViewVersion.current;
+    if (confirmDelete !== 'all') setPendingGuestDeletes((pending) => [...pending, confirmDelete]);
     setConfirmDelete(null);
     invalidateDownloads();
     setGuestClearStatus('');
@@ -664,6 +675,11 @@ function JournalSession({
         };
         if (confirmDelete !== 'all') {
           saveGuestChange(stored, removeConfirmed, removeConfirmed(view), version);
+          if (version !== guestViewVersion.current) {
+            // A later action owns the view. Apply just this completed deletion to it.
+            dataRef.current = removeConfirmed(dataRef.current);
+            setData(removeConfirmed);
+          }
           return;
         }
         let remaining = removeConfirmed(latest.data);
@@ -702,7 +718,10 @@ function JournalSession({
         setWarning(
           'This browser could not coordinate the deletion with other tabs. Restore browser storage access and confirm again.',
         ),
-    );
+    ).finally(() => {
+      if (confirmDelete !== 'all')
+        setPendingGuestDeletes((pending) => pending.filter((target) => target !== confirmDelete));
+    });
     invalidateDownloads();
   };
   const copyReading = async () => {

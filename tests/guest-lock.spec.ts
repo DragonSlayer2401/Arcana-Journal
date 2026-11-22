@@ -86,6 +86,7 @@ test('a guest tab denied coordination can export its edits and preserves the sha
   await restricted.getByRole('button', { name: 'Delete reading: Saved in the other tab' }).click();
   await restricted.getByRole('dialog').getByRole('button', { name: 'Delete Reading' }).click();
   await expect(restricted.getByText(/could not coordinate the deletion/)).toBeVisible();
+  await expect(restricted.getByRole('heading', { name: 'Saved in the other tab' })).toBeVisible();
   const data = await guestBackup(restricted);
   expect(data.readings.map(({ question }) => question).sort()).toEqual([
     'Saved in the other tab',
@@ -154,6 +155,7 @@ for (const mode of ['mixed window and worker locks', 'legacy IndexedDB'] as cons
         page.getByRole('dialog').getByRole('button', { name: 'Delete Reading' }).click(),
         sibling.getByRole('button', { name: /Draw Cards/ }).click(),
       ]);
+      await expect(page.getByRole('heading', { name: 'Original spread' })).toHaveCount(0);
       expect(await questions(page)).toEqual(['Original spread']);
       expect(await warnsBeforeClose(page)).toBe(true);
       expect(await warnsBeforeClose(sibling)).toBe(true);
@@ -162,6 +164,8 @@ for (const mode of ['mixed window and worker locks', 'legacy IndexedDB'] as cons
       await holder.dispose();
     }
     await expect.poll(() => questions(page)).toEqual(['Concurrent draw']);
+    await expect(page.getByRole('heading', { name: 'Concurrent draw' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Original spread' })).toHaveCount(0);
     await expect.poll(() => warnsBeforeClose(page)).toBe(false);
     await expect.poll(() => warnsBeforeClose(sibling)).toBe(false);
     await sibling.reload();
