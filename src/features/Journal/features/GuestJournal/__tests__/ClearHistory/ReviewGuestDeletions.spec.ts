@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import { importFile, savedJournal } from '@/test/browser/journal';
 
 for (const single of [true, false]) {
@@ -102,10 +103,10 @@ test('a confirmed guest deletion keeps a replacement saved while waiting for the
       )
       .toBe(true);
     await sibling.evaluate(
-      (updatedJournal) => {
-        localStorage.setItem('stilllight.tarot.v1', JSON.stringify(updatedJournal));
+      ({ key, updatedJournal }) => {
+        localStorage.setItem(key, JSON.stringify(updatedJournal));
       },
-      { ...journal, readings: [replacement] },
+      { key: guestStorageKey, updatedJournal: { ...journal, readings: [replacement] } },
     );
   } finally {
     await holder.evaluate((release) => release());

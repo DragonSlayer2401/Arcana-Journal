@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import { importFile, savedJournal } from '@/test/browser/journal';
 
 test('a merged guest backup restores twice onto each original journal with a shared legacy ID', async ({
@@ -181,16 +182,16 @@ test('a failed storage write leaves both journals intact and the same backup can
     buffer: Buffer.from(JSON.stringify({ version: 1, readings: [incoming] })),
   };
   await page.getByRole('link', { name: /^Journal/ }).click();
-  await page.evaluate(() => {
+  await page.evaluate((journalKey) => {
     const originalSetItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
-      if (key === 'stilllight.tarot.v1') {
+      if (key === journalKey) {
         Storage.prototype.setItem = originalSetItem;
         throw new DOMException('Quota exceeded', 'QuotaExceededError');
       }
       return originalSetItem.call(this, key, value);
     };
-  });
+  }, guestStorageKey);
   await importFile(page, backup);
   await page.getByRole('button', { name: 'Confirm import' }).click();
   await expect(page.getByRole('main').getByRole('alert')).toBeVisible();

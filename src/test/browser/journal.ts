@@ -1,8 +1,9 @@
 import { type FileChooser, type Page } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import type { AppData } from '@/features/Journal/utils/journalData';
 
 export const savedJournal = (page: Page): Promise<AppData> =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('stilllight.tarot.v1')!));
+  page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), guestStorageKey);
 
 export const importFile = async (page: Page, file: Parameters<FileChooser['setFiles']>[0]) => {
   const chooser = page.waitForEvent('filechooser');

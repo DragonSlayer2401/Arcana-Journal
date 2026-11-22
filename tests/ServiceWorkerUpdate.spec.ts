@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { AppData } from '@/features/Journal/utils/journalData';
+import { savedJournal } from '@/test/browser/journal';
 
 type OfflineReply = { type?: string; ready?: boolean; version?: string };
 const readOfflineReply = (
@@ -29,9 +29,6 @@ const readOfflineReply = (
     });
   }, target);
 
-const savedData = (page: Page): Promise<AppData> =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('stilllight.tarot.v1')!));
-
 test('a cached update waits for all app windows to close and preserves the exact saved reading', async ({
   page,
   context,
@@ -50,7 +47,7 @@ test('a cached update waits for all app windows to close and preserves the exact
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await page.getByRole('button', { name: 'Reveal card 1' }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toBeVisible();
-  const original = await savedData(page);
+  const original = await savedJournal(page);
   expect(original.readings[0].revealed).toEqual([true, false, false]);
 
   // Observe any unexpected automatic navigation while the new worker installs.
@@ -75,11 +72,13 @@ test('a cached update waits for all app windows to close and preserves the exact
   expect(waitingWorker.ready).toBe(true);
   expect(waitingWorker.version).toBe(`${originalWorker.version}-update-test-v2`);
   expect((await readOfflineReply(page)).version).toBe(originalWorker.version);
-  expect(await savedData(page)).toEqual(original);
+  expect(await savedJournal(page)).toEqual(original);
   expect(unexpectedReloads).toBe(0);
   await expect(page.getByRole('button', { name: 'Reveal card 2' })).toBeVisible();
   const installedCaches = await page.evaluate(() => caches.keys());
-  expect(installedCaches.filter((name) => name.startsWith('stilllight-assets-'))).toHaveLength(2);
+  expect(installedCaches.filter((name) => name.startsWith('arcana-journal-assets-'))).toHaveLength(
+    2,
+  );
 
   // A second app window also keeps the update waiting after the first closes.
   const secondWindow = await context.newPage();
@@ -87,7 +86,7 @@ test('a cached update waits for all app windows to close and preserves the exact
   expect(await oldDocument!.headerValue('x-arcana-build')).toBe(buildId);
   await expect(secondWindow.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   expect((await readOfflineReply(secondWindow)).version).toBe(originalWorker.version);
-  expect(await savedData(secondWindow)).toEqual(original);
+  expect(await savedJournal(secondWindow)).toEqual(original);
   await page.close();
   expect((await readOfflineReply(secondWindow)).version).toBe(originalWorker.version);
   expect((await readOfflineReply(secondWindow, 'waiting')).version).toBe(waitingWorker.version);
@@ -111,11 +110,11 @@ test('a cached update waits for all app windows to close and preserves the exact
   expect(await newDocument!.headerValue('x-arcana-build')).toBe(buildId + '-v2');
   await expect(reopened.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   expect((await readOfflineReply(reopened)).version).toBe(waitingWorker.version);
-  expect(await savedData(reopened)).toEqual(original);
+  expect(await savedJournal(reopened)).toEqual(original);
   await expect(reopened.getByRole('button', { name: 'Reveal card 2' })).toBeVisible();
   await expect(reopened.getByRole('button', { name: /Draw Cards/ })).toHaveCount(0);
   const activeCaches = await reopened.evaluate(() => caches.keys());
-  expect(activeCaches.filter((name) => name.startsWith('stilllight-assets-'))).toEqual([
-    `stilllight-assets-${waitingWorker.version}`,
+  expect(activeCaches.filter((name) => name.startsWith('arcana-journal-assets-'))).toEqual([
+    `arcana-journal-assets-${waitingWorker.version}`,
   ]);
 });

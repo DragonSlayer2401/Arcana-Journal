@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { expect } from '@playwright/test';
 import { verifyEmulatorEmail } from '../../../../../../../scripts/emulator-email.mjs';
+import { guestStorageKey } from '../../../GuestJournal/utils/guestStorageKey.ts';
 import { withApp, downloadReadings } from '../../../../../../test/emulator/journalBrowser.mjs';
 
 test(
@@ -61,16 +62,16 @@ test(
       'While waiting for my verification email',
     ]);
     await first.goBack();
-    await first.evaluate(() => {
+    await first.evaluate((journalKey) => {
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
-        if (this === localStorage && key === 'stilllight.tarot.v1') {
+        if (this === localStorage && key === journalKey) {
           Storage.prototype.setItem = setItem;
           throw new DOMException('Guest storage is full', 'QuotaExceededError');
         }
         return setItem.call(this, key, value);
       };
-    });
+    }, guestStorageKey);
     await first.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
     await expect(first.getByText(/your cards are still available in this session/i)).toBeVisible();
     const sibling = await context.newPage();

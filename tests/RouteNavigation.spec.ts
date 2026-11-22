@@ -1,8 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
-import type { AppData } from '@/features/Journal/utils/journalData';
-
-const savedData = (page: Page): Promise<AppData> =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('stilllight.tarot.v1')!));
+import { expect, test } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
+import { savedJournal } from '@/test/browser/journal';
 
 test('Reading and the logo return an open spread to the draw form and keep its journal entry', async ({
   page,
@@ -12,7 +10,7 @@ test('Reading and the logo return an open spread to the draw form and keep its j
   await draw.click();
   await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(1);
-  const [original] = (await savedData(page)).readings;
+  const [original] = (await savedJournal(page)).readings;
 
   await page.getByRole('link', { name: 'Reading', exact: true }).click();
   await expect(draw).toBeVisible();
@@ -23,7 +21,7 @@ test('Reading and the logo return an open spread to the draw form and keep its j
   await page.getByRole('link', { name: 'Arcana Journal, reading', exact: true }).click();
   await draw.click();
   await expect(page.getByRole('button', { name: /^Reveal card/ })).toHaveCount(3);
-  const { readings } = await savedData(page);
+  const { readings } = await savedJournal(page);
   expect(readings).toHaveLength(2);
   expect(readings[1]).toEqual(original);
 });
@@ -66,7 +64,7 @@ for (const [path, title, navigation] of [
     await page.reload();
     await expect(page).toHaveURL(path);
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'))).toBeNull();
+    expect(await page.evaluate((key) => localStorage.getItem(key), guestStorageKey)).toBeNull();
     await page.getByRole('link', { name: 'Reading', exact: true }).click();
     await expect(page).toHaveURL('/');
     await expect(page.getByRole('button', { name: /Draw Cards/ })).toBeVisible();
@@ -82,7 +80,7 @@ test('account forms open at their own URLs and preserve the guest journal throug
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
-  const original = await savedData(page);
+  const original = await savedJournal(page);
   const header = page.getByRole('banner');
   await expect(header.getByRole('link', { name: 'Create account' })).toHaveAttribute(
     'href',
@@ -108,7 +106,7 @@ test('account forms open at their own URLs and preserve the guest journal throug
   await expect(page.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
   await header.getByRole('link', { name: /^Journal/ }).click();
   await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
-  expect(await savedData(page)).toEqual(original);
+  expect(await savedJournal(page)).toEqual(original);
 });
 
 test('back, forward and offline route refresh preserve one exact saved reading and dismiss dialogs', async ({
@@ -122,7 +120,7 @@ test('back, forward and offline route refresh preserve one exact saved reading a
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toBeVisible();
-  const original = await savedData(page);
+  const original = await savedJournal(page);
   expect(original.readings).toHaveLength(1);
   expect(original.readings[0].revealed).toEqual([true, false, false]);
 
@@ -151,7 +149,7 @@ test('back, forward and offline route refresh preserve one exact saved reading a
   await page.goForward();
   await expect(page).toHaveURL('/deck');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(await savedData(page)).toEqual(original);
+  expect(await savedJournal(page)).toEqual(original);
 
   await context.setOffline(true);
   await page.reload();
@@ -169,5 +167,5 @@ test('back, forward and offline route refresh preserve one exact saved reading a
   await expect(page.getByRole('button', { name: /^Reveal card/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: /Draw Cards/ })).toHaveCount(0);
-  expect(await savedData(page)).toEqual(original);
+  expect(await savedJournal(page)).toEqual(original);
 });

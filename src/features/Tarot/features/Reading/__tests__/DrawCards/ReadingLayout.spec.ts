@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
+import { savedJournal } from '@/test/browser/journal';
 
-const saved = (page: Page) =>
-  page.evaluate(() => JSON.parse(localStorage.getItem('stilllight.tarot.v1')!));
 const noOverflow = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
@@ -23,8 +23,8 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
     .fill('What deserves a little more attention?');
   await page.getByRole('button', { name: /Draw Cards/ }).dblclick();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
-  const original = (await saved(page)).readings[0];
-  expect((await saved(page)).readings).toHaveLength(1);
+  const original = (await savedJournal(page)).readings[0];
+  expect((await savedJournal(page)).readings).toHaveLength(1);
   expect(original.cards).toHaveLength(3);
   expect(original.revealed).toEqual([false, false, false]);
   await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
@@ -38,8 +38,8 @@ test('mobile layout, reveal, details, journal and reload retain the saved result
   await page.getByRole('button', { name: /^Open reading:/ }).click();
   await expect(page).toHaveURL('/');
   await page.reload();
-  expect((await saved(page)).readings[0].cards).toEqual(original.cards);
-  expect((await saved(page)).readings[0].revealed).toEqual([true, false, false]);
+  expect((await savedJournal(page)).readings[0].cards).toEqual(original.cards);
+  expect((await savedJournal(page)).readings[0].revealed).toEqual([true, false, false]);
   await page.getByRole('button', { name: 'Reveal All' }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(3);
   await noOverflow(page);
@@ -62,7 +62,7 @@ test('cached app reloads offline and makes fresh local pulls with meanings', asy
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
-  const reading = (await saved(page)).readings[0];
+  const reading = (await savedJournal(page)).readings[0];
   await page.getByRole('button', { name: 'Reveal All' }).click();
   await page
     .getByRole('button', { name: /View card details/ })
@@ -71,13 +71,13 @@ test('cached app reloads offline and makes fresh local pulls with meanings', asy
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: 'Close dialog' }).click();
   await page.reload();
-  expect((await saved(page)).readings[0].cards).toEqual(reading.cards);
+  expect((await savedJournal(page)).readings[0].cards).toEqual(reading.cards);
   await page.getByRole('button', { name: 'New Reading' }).click();
   await page.getByRole('button', { name: /One card/ }).click();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
-  expect((await saved(page)).readings).toHaveLength(2);
-  expect((await saved(page)).readings[0].cards).toHaveLength(1);
+  expect((await savedJournal(page)).readings).toHaveLength(2);
+  expect((await savedJournal(page)).readings[0].cards).toHaveLength(1);
 });
 
 test('small screens instantly reveal a ten-card spread with reversals and respect reduced motion', async ({
@@ -97,8 +97,7 @@ test('small screens instantly reveal a ten-card spread with reversals and respec
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: /View card details/ })).toHaveCount(10);
   expect(
-    new Set((await saved(page)).readings[0].cards.map((card: { cardId: string }) => card.cardId))
-      .size,
+    new Set((await savedJournal(page)).readings[0].cards.map((card) => card.cardId)).size,
   ).toBe(10);
   expect(
     await page
@@ -118,9 +117,9 @@ test('long card captions remain upright and fit at 200% text size on a 320px scr
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 844 });
-  await page.addInitScript(() => {
+  await page.addInitScript((key) => {
     localStorage.setItem(
-      'stilllight.tarot.v1',
+      key,
       JSON.stringify({
         version: 1,
         settings: { mode: 'three', customCount: 5, reversals: true },
@@ -141,7 +140,7 @@ test('long card captions remain upright and fit at 200% text size on a 320px scr
         ],
       }),
     );
-  });
+  }, guestStorageKey);
   await page.goto('/');
   await expect(
     page.getByRole('button', { name: 'Knight of Pentacles, reversed. View card details' }),

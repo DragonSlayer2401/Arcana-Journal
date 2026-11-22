@@ -10,7 +10,7 @@ test('offline readiness detects a lost asset and repairs it when back online', a
   await page.evaluate(async () => {
     const keys = await caches.keys();
     for (const key of keys)
-      if (key.startsWith('stilllight-assets-')) {
+      if (key.startsWith('arcana-journal-assets-')) {
         const cache = await caches.open(key);
         const requests = await cache.keys();
         const icon = requests.find((request) => request.url.endsWith('.png'));

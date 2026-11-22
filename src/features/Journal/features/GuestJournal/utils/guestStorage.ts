@@ -1,7 +1,8 @@
 import { freshData, readSettings, type AppData } from '@/features/Journal/utils/journalData';
 import { isReading } from '@/features/Journal/utils/readingValidation';
+import { guestStorageKey } from './guestStorageKey';
 
-export const guestStorageKey = 'stilllight.tarot.v1';
+export { guestStorageKey };
 export const guestRecoveryKey = guestStorageKey + '.recovery';
 
 const parseSavedData = (raw: string): AppData => {

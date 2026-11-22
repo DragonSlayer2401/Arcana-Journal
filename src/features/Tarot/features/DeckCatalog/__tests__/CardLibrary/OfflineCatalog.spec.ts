@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import { cardById, tarotDeck } from '@/features/Tarot/data/deck';
 
 const cardNamePattern = new RegExp(`^(?:${tarotDeck.map((card) => card.name).join('|')})$`);
@@ -27,7 +28,7 @@ test('the full card library, filters, artwork and both meanings work offline on 
   await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
-  const saved = await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'));
+  const saved = await page.evaluate((key) => localStorage.getItem(key), guestStorageKey);
   await context.setOffline(true);
   await page.reload();
   await page.getByRole('link', { name: 'Deck', exact: true }).click();
@@ -69,7 +70,7 @@ test('the full card library, filters, artwork and both meanings work offline on 
     animations: 'disabled',
   });
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
-  expect(await page.evaluate(() => localStorage.getItem('stilllight.tarot.v1'))).toBe(saved);
+  expect(await page.evaluate((key) => localStorage.getItem(key), guestStorageKey)).toBe(saved);
   await page.getByRole('link', { name: 'Reading', exact: true }).click();
   await expect(page.getByRole('button', { name: /Draw Cards/ })).toBeVisible();
 });

@@ -15,7 +15,7 @@ const chunk = '/_next/static/chunks/app/(journal)/page.js';
 const html = (id, label) => `<!doctype html><html><body>${label} (build ${id})</body></html>`;
 const bodies = new Map([
   [chunk, 'console.log("test fixture");'],
-  ['/manifest.webmanifest', '{"name":"Stilllight fixture"}'],
+  ['/manifest.webmanifest', '{"name":"Arcana Journal fixture"}'],
 ]);
 const snapshot = (path, ext = 'html') =>
   '/_next/static/' + buildId + '/offline/' + (path.slice(1) || 'index') + '.' + ext;
@@ -27,7 +27,7 @@ let testRoot;
 let code;
 
 before(async () => {
-  testRoot = await mkdtemp(join(tmpdir(), 'stilllight-sw-test-'));
+  testRoot = await mkdtemp(join(tmpdir(), 'arcana-journal-sw-test-'));
   for (const [url, body] of bodies) {
     const file = join(
       testRoot,
@@ -48,7 +48,7 @@ after(async () => {
   const resolved = resolve(testRoot);
   const withinTemp = relative(resolve(tmpdir()), resolved);
   assert.equal(withinTemp, basename(resolved));
-  assert.ok(basename(resolved).startsWith('stilllight-sw-test-'));
+  assert.ok(basename(resolved).startsWith('arcana-journal-sw-test-'));
   await rm(resolved, { recursive: true, force: true });
 });
 
@@ -69,7 +69,7 @@ const harness = (workerCode = code) => {
     Response,
     Request: class extends Request {
       constructor(url, options) {
-        super(new URL(url, 'https://stilllight.test'), options);
+        super(new URL(url, 'https://arcana-journal.test'), options);
       }
     },
     fetch: async (request) => {
@@ -77,7 +77,7 @@ const harness = (workerCode = code) => {
       const path = new URL(request.url).pathname;
       fetches.push(request);
       if (appPaths.includes(path) && liveStatus === 307)
-        return Response.redirect('https://stilllight.test/login', 307);
+        return Response.redirect('https://arcana-journal.test/login', 307);
       if (appPaths.includes(path))
         return new Response(html(liveBuild, 'Live response for ' + request.url), {
           headers: { 'x-arcana-build': liveBuild },
@@ -105,7 +105,7 @@ const harness = (workerCode = code) => {
       delete: async (name) => stores.delete(name),
     },
     self: {
-      location: { origin: 'https://stilllight.test' },
+      location: { origin: 'https://arcana-journal.test' },
       clients: {
         claim: async () => {
           claimed = true;
@@ -146,7 +146,7 @@ const harness = (workerCode = code) => {
     let response;
     listeners.get('fetch')({
       request: {
-        url: new URL(path, 'https://stilllight.test').href,
+        url: new URL(path, 'https://arcana-journal.test').href,
         method: 'GET',
         mode,
         headers: new Headers(headers),
@@ -182,7 +182,7 @@ const harness = (workerCode = code) => {
       return skipWaitingCalls;
     },
     get ownCache() {
-      return [...stores.entries()].find(([key]) => key.startsWith('stilllight-assets-'))?.[1];
+      return [...stores.entries()].find(([key]) => key.startsWith('arcana-journal-assets-'))?.[1];
     },
   };
 };
@@ -238,10 +238,10 @@ test('offline navigation and assets are served from the installed version', asyn
   }
   const trailing = await sw.request('/deck/?view=all');
   assert.equal(trailing.status, 307);
-  assert.equal(trailing.headers.get('Location'), 'https://stilllight.test/deck?view=all');
+  assert.equal(trailing.headers.get('Location'), 'https://arcana-journal.test/deck?view=all');
   const unknown = await sw.request('/some-old-bookmark');
   assert.equal(unknown.status, 307);
-  assert.equal(unknown.headers.get('Location'), 'https://stilllight.test/');
+  assert.equal(unknown.headers.get('Location'), 'https://arcana-journal.test/');
   assert.equal(
     await (await sw.request(chunk.replace('(', '%28').replace(')', '%29'), 'cors')).text(),
     bodies.get(chunk),
@@ -287,7 +287,7 @@ test('SSR and Flight recover from server outages without swallowing redirects or
   sw.respondWithStatus(307);
   const redirect = await sw.request('/deck');
   assert.equal(redirect.status, 307);
-  assert.equal(redirect.headers.get('location'), 'https://stilllight.test/login');
+  assert.equal(redirect.headers.get('location'), 'https://arcana-journal.test/login');
   for (const status of [401, 403, 404, 429]) {
     sw.respondWithStatus(status);
     assert.equal((await sw.request('/deck')).status, status);
@@ -329,21 +329,24 @@ test('a failed installation never erases an existing same-version cache', async 
   assert.equal(await sw.ownCache.get(chunk).text(), bodies.get(chunk));
 });
 
-test('updates never skip waiting; obsolete caches are removed only at activation', async () => {
+test('updates keep previous and legacy caches until activation', async () => {
   const sw = harness();
-  sw.stores.set(
-    'stilllight-assets-previous-version',
-    new Map([['/index.html', new Response('old')]]),
-  );
+  const previousCache = 'arcana-journal-assets-previous-version';
+  const legacyCache = 'stilllight-assets-previous-version';
+  sw.stores.set(previousCache, new Map());
+  sw.stores.set(legacyCache, new Map());
   sw.stores.set('another-application-cache', new Map());
   await sw.dispatch('install');
   assert.equal(sw.skipWaitingCalls, 0);
-  assert.equal(sw.stores.has('stilllight-assets-previous-version'), true);
+  assert.equal(sw.stores.has(previousCache), true);
+  assert.equal(sw.stores.has(legacyCache), true);
   assert.equal(sw.claimed, false);
   await sw.dispatch('activate');
-  assert.equal(sw.stores.has('stilllight-assets-previous-version'), false);
+  assert.equal(sw.stores.has(previousCache), false);
+  assert.equal(sw.stores.has(legacyCache), false);
   assert.equal(sw.stores.has('another-application-cache'), true);
   assert.equal(sw.claimed, true);
+  sw.setOnline(false);
   assert.equal((await sw.status()).ready, true);
 });
 

@@ -1,12 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 import type { AppData } from '@/features/Journal/utils/journalData';
 
 const questions = (page: Page) =>
-  page.evaluate(() => {
-    const data: AppData | null = JSON.parse(localStorage.getItem('stilllight.tarot.v1') ?? 'null');
+  page.evaluate((key) => {
+    const data: AppData | null = JSON.parse(localStorage.getItem(key) ?? 'null');
     return data?.readings.map((reading) => reading.question) ?? [];
-  });
+  }, guestStorageKey);
 
 const warnsBeforeClose = (page: Page) =>
   page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
@@ -24,17 +25,16 @@ test('a guest draw remains in its backup after storage access returns', async ({
 }) => {
   await page.goto('/');
   await page.getByLabel(/What’s on your mind/).fill('Draw saved only in this tab');
-  const restore = await page.evaluateHandle(() => {
+  const restore = await page.evaluateHandle((journalKey) => {
     const get = Storage.prototype.getItem;
     Storage.prototype.getItem = function (key) {
-      if (key === 'stilllight.tarot.v1')
-        throw new DOMException('Storage unavailable', 'SecurityError');
+      if (key === journalKey) throw new DOMException('Storage unavailable', 'SecurityError');
       return get.call(this, key);
     };
     return () => {
       Storage.prototype.getItem = get;
     };
-  });
+  }, guestStorageKey);
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
   await page.getByRole('link', { name: /^Journal/ }).click();

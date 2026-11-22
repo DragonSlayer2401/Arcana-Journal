@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorageKey';
 
-const journalKey = 'stilllight.tarot.v1';
-const recoveryKey = journalKey + '.recovery';
+const recoveryKey = guestStorageKey + '.recovery';
 const accountKey = 'arcana.journal.recovery.v1:another-account:its-reading';
 const unrelatedKey = recoveryKey + '.preferences';
 
@@ -65,7 +65,7 @@ test('guest clear erases recovery copies after confirmation and keeps unrelated 
   const after = await page.evaluate(() => ({ ...localStorage }));
   expect(after[accountKey]).toBe(before[accountKey]);
   expect(after[unrelatedKey]).toBe(before[unrelatedKey]);
-  expect(JSON.parse(after[journalKey]).readings).toEqual([]);
+  expect(JSON.parse(after[guestStorageKey]).readings).toEqual([]);
   expect([after[recoveryKey], after[recoveryKey + '.1'], after[recoveryKey + '.14']]).toEqual([
     undefined,
     undefined,
@@ -117,7 +117,7 @@ test('a guest tab can export its unsaved reveal after a sibling clears the saved
       if (name === key) throw new DOMException('Read-only guest journal', 'SecurityError');
       write.call(this, name, value);
     };
-  }, journalKey);
+  }, guestStorageKey);
   await draft.getByRole('button', { name: 'Reveal card 1' }).click();
   await expect(draft.getByText(/could not save your reading or settings/)).toBeVisible();
   await draft.getByRole('link', { name: /^Journal/ }).click();
@@ -135,7 +135,7 @@ test('a guest tab can export its unsaved reveal after a sibling clears the saved
     expect.objectContaining({ question, revealed: [true, false, false] }),
   ]);
   expect(
-    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).readings, journalKey),
+    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!).readings, guestStorageKey),
   ).toEqual([]);
 });
 
