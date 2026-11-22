@@ -35,9 +35,7 @@ export const ShareReading = ({ reading }: { reading: Reading }) => {
           <Icon name={copied ? 'check' : 'copy'} />
           {copied ? 'Copied Reading' : 'Copy Reading'}
         </button>
-        <span role="status">
-          {copied ? 'Ready to paste into your chat or notes.' : 'Your cards stay exactly as drawn.'}
-        </span>
+        <span role="status">{copied && 'Ready to paste into your chat or notes.'}</span>
       </div>
       {copy?.status === 'manual' && (
         <Modal title="Copy your reading" onClose={() => setCopy(null)}>

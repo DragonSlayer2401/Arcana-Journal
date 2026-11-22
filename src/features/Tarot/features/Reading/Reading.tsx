@@ -5,9 +5,8 @@ import {
   SpreadSelector,
   QuestionInput,
   DrawControls,
-  JournalScope,
+  DrawError,
 } from './components/ReadingForm';
-import { Icon } from '@/components/Icon';
 
 export const Reading = () => {
   const cardBack = <CardBackArtwork />;
@@ -27,7 +26,7 @@ export const Reading = () => {
           <br className="mobile-break" /> The meaning you find is yours.
         </p>
       </section>
-      <section className="reading-workspace" aria-label="Prepare your reading">
+      <div className="reading-workspace">
         <div className="deck-preview" aria-hidden="true">
           <div className="orbital orbital-one" />
           <div className="orbital orbital-two" />
@@ -53,17 +52,7 @@ export const Reading = () => {
           <DrawControls />
           <p className="draw-note">Every card has an equal chance. Every reading starts fresh.</p>
         </ReadingForm>
-      </section>
-      <div className="principles">
-        <span>
-          <Icon name="moon" size={17} /> Your own quiet ritual
-        </span>
-        <span>
-          <Icon name="check" size={17} /> Secure, unbiased draws
-        </span>
-        <span>
-          <Icon name="book" size={17} /> <JournalScope />
-        </span>
+        <DrawError />
       </div>
     </ReadingWorkspace>
   );

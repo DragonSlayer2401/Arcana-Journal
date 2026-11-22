@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Link from 'next/link';
+import { AccountDialogLink } from '../features/AccountAccess/components/AccountDialogLink';
 import {
   refreshAccount,
   retryOfflineRemoval,
@@ -67,12 +67,12 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled, onLock }: Prop
             </button>
           ) : (
             <>
-              <Link className="button button-gold" prefetch={false} href="/login">
+              <AccountDialogLink className="button button-gold" href="/login">
                 Sign in
-              </Link>
-              <Link className="button button-secondary" prefetch={false} href="/signup">
+              </AccountDialogLink>
+              <AccountDialogLink className="button button-secondary" href="/signup">
                 Create account
-              </Link>
+              </AccountDialogLink>
             </>
           )}
         </div>
