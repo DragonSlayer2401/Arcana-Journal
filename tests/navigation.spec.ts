@@ -30,6 +30,37 @@ for (const [path, title, navigation] of [
   });
 }
 
+test('account forms open at their own URLs and preserve the guest journal through offline navigation', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Ready for offline use' })).toBeVisible();
+  await page.getByRole('button', { name: /Draw Cards/ }).click();
+  await expect(page.getByRole('button', { name: 'Reveal card 1', exact: true })).toBeVisible();
+  const original = await savedData(page);
+  const header = page.getByRole('banner');
+  await expect(header.getByRole('link', { name: 'Create account' })).toHaveAttribute(
+    'href',
+    '/signup',
+  );
+  await header.getByRole('link', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL('/login');
+  await expect(page.getByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
+  await page.getByRole('main').getByRole('link', { name: 'Create account' }).click();
+  await expect(page).toHaveURL('/signup');
+  await page.reload();
+  await expect(page.getByLabel('Confirm password')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await context.setOffline(true);
+  await page.goto('/reset-password');
+  await expect(page.getByRole('heading', { level: 1, name: 'Reset password' })).toBeVisible();
+  await header.getByRole('link', { name: /^Journal/ }).click();
+  await expect(page.getByRole('button', { name: /^Open reading:/ })).toHaveCount(1);
+  expect(await savedData(page)).toEqual(original);
+});
+
 test('back, forward and offline route refresh preserve one exact saved reading and dismiss dialogs', async ({
   page,
   context,
@@ -40,6 +71,7 @@ test('back, forward and offline route refresh preserve one exact saved reading a
   await page.getByRole('checkbox', { name: /Include reversals/ }).check();
   await page.getByRole('button', { name: /Draw Cards/ }).click();
   await page.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
+  await expect(page.getByRole('button', { name: /View card details/ })).toBeVisible();
   const original = await savedData(page);
   expect(original.readings).toHaveLength(1);
   expect(original.readings[0].revealed).toEqual([true, false, false]);

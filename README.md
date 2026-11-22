@@ -1,12 +1,12 @@
 # Arcana Journal
 
-A complete, browser-only tarot PWA built with React, TypeScript, and Vite. It includes 78 illustrated Rider–Waite–Smith scenes in a colorful, textured style, fixed upright and reversed meanings, one-card/three-card/custom spreads, individual reveals, a local reading journal, and copying for interpretation elsewhere. Three cards and upright-only draws are the defaults.
+A tarot PWA built with React, TypeScript, and Vite. It includes 78 illustrated Rider–Waite–Smith scenes, upright and reversed meanings, one-card/three-card/custom spreads, and individual reveals. Guests keep a journal on their device. An optional account syncs readings across browsers and devices. Three cards and upright-only draws are the defaults.
 
 Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by card name and tap a card to read both its upright and reversed keywords and meanings. The library works offline once the app reports offline readiness.
 
-Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. Refresh or bookmark any page, or move between pages using browser Back and Forward. After offline setup, the service worker serves the app at each URL. On a fresh online visit, Cloudflare Pages serves the app using its [single-page application routing](https://developers.cloudflare.com/pages/configuration/serving-pages/#single-page-application-spa-rendering).
+Reading (`/`), Deck (`/deck`), and Journal (`/journal`) each have their own URL. The sign-in, signup, and password-reset forms also support direct links. Cloudflare serves the app at these paths using the [static asset rules](https://developers.cloudflare.com/workers/static-assets/redirects/#proxying) in `public/_redirects`. After offline setup, the service worker serves the cached pages. Account requests need a connection.
 
-There is no application account, backend, database, API key, paid service, analytics, or external font/image dependency. The deployed application runs on the device. A free Cloudflare account is needed only to publish it; visitors do not sign in.
+Cloudflare serves the static build. Firebase Authentication handles optional email/password accounts, and Cloud Firestore stores each account's journal. Draws and card illustrations work on the device. The Firebase Spark plan covers these services within its free quotas.
 
 ## Run it
 
@@ -73,19 +73,67 @@ All 78 card faces are bundled locally as 768 × 1152 WebP illustrations in `publ
 
 The source/license record is `art/references/sources.json`, and generation prompts are retained in `art/generated/*.prompt.txt`. The user's style reference and full-resolution working images are kept outside `public/` and are excluded from release archives. See `ASSETS.md`, `art/STYLE.md`, and `LICENSE` for provenance and reuse details. Dependency licenses remain their respective authors' licenses.
 
-## Local history and privacy
+## Journal accounts and backups
 
-Settings and readings are stored in this browser's local storage. History is specific to this device, browser, and site address. It does not sync. A Home Screen installation may have separate storage from Safari depending on the iOS version and installation context; check the journal in the installed app before relying on a reading being available there.
+Choose **Sign in** (`/login`) or **Create account** (`/signup`) to access your journal with an email address and password. **Forgot password?** opens the password-reset form (`/reset-password`). New accounts use the guest journal on this device until you follow the verification link in your email and choose **Check verification** in Journal. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
 
-On the Journal page, **Export journal** downloads a versioned JSON backup of every reading, including its ID, original date, question, cards in draw order, orientations, and per-card reveal progress. To restore it here or on another device, choose **Import journal** and select the file. Import adds missing readings and keeps the local copy of any reading with a matching ID. **Copy Reading** shares a single spread as readable text.
+On a trusted device, choose **Lock journal** on the Journal page and wait for **Journal locked** before handing it over. A saved lock covers the app’s other tabs and survives reopening the browser. If the browser cannot save the lock, the lock screen tells you that only this tab is locked. Use your device’s screen lock before handing it over in that case. Firebase keeps the account signed in so its queued changes can sync. Anyone with access to the browser profile’s stored data can still read the local cache.
 
-Clearing browser/app data, removing site storage, device loss, or browser storage eviction can erase history and cached assets. The app warns when storage cannot be read or written. A reading can still be exported while it is available in the current session. Delete and Clear History remove local entries. Anyone with access to this browser profile or a backup file can read its journal entries.
+To withdraw device trust, sign out and sign in again with the trusted-device option off. The app removes that account’s offline Firestore journal. If a tab is still using it, let its changes sync and close it. If changes are waiting on this device, reopen the trusted journal to sync or recover them. The memory-only journal shows an explanation and **Retry offline journal removal** while cleanup is incomplete.
+
+A memory-only session restored from an older version may ask you to confirm removal because another sign-in could have granted trust since then. A trusted session can reopen its cache offline using its last verified Firebase token. When Firebase reports that the email needs verification again, open journals return to verification and the shared journal lock stays in effect.
+
+If **Sign-out incomplete** appears, the journal is hidden in that tab. Restore browser storage access and choose **Retry sign out** to finish removing the persisted session.
+
+Trusted sign-in and sign-out need browser support for coordinating changes across tabs. If your browser blocks that access, use **Lock journal** for an existing trusted session. On a signed-out device, you can leave the trusted-device option off.
+
+To unlock, reconnect and enter the original account’s password. If you forgot it, choose **Send password reset email** on the lock screen. Follow the link in the account’s inbox, then return to the journal and enter the new password.
+
+The trusted journal keeps an account-specific recovery copy of draws and card reveals that are waiting to sync. If a reading needs recovery after you unlock, choose **Recover unsynced readings**, review the destination and confirm the import. If the browser cannot save a recovery copy, keep the tab holding the reading open until it syncs. You can also choose **Download unsynced readings** before locking to save a backup.
+
+If another tab asks you to wait before signing out, return to the tab holding the changes and check its sync status. In browsers that cannot coordinate sign-out across tabs, keep the original tab open and sign back into the same account to recover a reading held in memory. If the journal reports that a recovery copy could not be read or removed, restore browser storage access and choose **Retry sync**.
+
+Guest journals stay in the browser profile and site address that created them. To sync existing readings, including those drawn while awaiting verification, open the verified account on that device, choose **Import this device’s journal**, review the destination email and counts, and confirm. The original guest readings remain available when signed out. If Safari and the installed Home Screen app contain different readings, repeat the import in each. Keep the current production address when deploying an update.
+
+Guest deletion and clearing apply to the spreads you confirmed. A spread added or replaced in another tab is kept. **Clear History** also erases guest recovery copies on this device, even when the journal is empty. If the browser reports an incomplete clear, restore storage access and choose **Clear History** again.
+
+If guest changes could not be saved, choose **Export journal** before closing the tab. If you have already signed in, choose **Download guest backup**. The guest backup combines your unsaved changes with the latest saved guest readings. It keeps separate draws with matching spreads and leaves out untouched readings another tab deleted. You can import the file after reloading, or use **Import this device’s journal** to preview those readings for your account.
+
+**Export journal** downloads a versioned JSON file with each reading’s original date, question, ordered cards, orientations, and reveal progress. An account download is labeled **cloud and this tab**. It includes all cloud pages and recovery copies available in the exporting tab. If another tab reports unsynced readings, sync or recover them there before exporting. A suspended or storage-restricted tab may need to be reopened to include its changes. If some local copies are unreadable, you can download a partial backup of the available unsynced readings and retry after restoring storage access. If this browser cannot check saved deletions, **Export available readings** labels the download **unchecked deletions**. It may include a reading waiting to be deleted. Restore storage access and reopen the journal to finish syncing those deletions.
+
+Choose **Import journal** to preview and merge a backup. Backup dates use UTC. A legacy file date without a time zone is read as UTC, and a date with an offset keeps its original instant. Previously synced legacy readings retain the instant recorded by the device that uploaded them. Repeating an import combines reveal progress. For different readings with a shared legacy ID, the journal keeps the original ID alongside the new ID assigned to the collision. This lets the merged file restore onto either original journal. Anyone with access to a backup can read it. **Copy Reading** shares one spread as readable text.
+
+Account imports check for earlier deletions of the same reading, including deletions confirmed in another tab. If a deletion is pending, let it finish syncing and retry. If the browser cannot check, the preview explains the risk and asks whether to continue. When you choose to recover unsynced readings with that check unavailable, the app keeps an account-specific recovery copy. Once storage access returns and deletions finish syncing, choose **Recover unsynced readings** again to complete recovery.
+
+Account **Clear History** checks every page before asking you to confirm the number of synced readings. Readings added, updated or replaced after that review stay in the journal. If you confirm an import while a clear is running, the clear can stop partway through to protect the imported readings. Review the remaining journal before confirming another clear. If a tab closed during a clear, a checked export warns you when Firestore still shows that clear in progress. You can retry the checked export or choose **Export available readings** for a backup labeled **unchecked deletions**.
+
+Deleting a guest reading affects this browser only. For an account reading, Firebase verifies the selected spread before deleting it across devices. A replacement that reuses its ID is kept. Trusted browsers can save a confirmed offline deletion and finish it when the same account reconnects. If the browser asks you to keep the tab open, leave it open until the deletion syncs. Reopening the journal also checks interrupted deletions before removing their recovery copies. Guest storage and trusted offline caches can be lost when someone clears browser data.
+
+When upgrading, let **Clear History** and queued changes finish in older tabs before recovering readings or reusing a reading ID on another device. Reopen the updated app for recovery. Firebase processes previously submitted writes in the format used by the version that created them.
+
+### Firebase setup for this deployment
+
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication, authorize `arcana-journal.jacobskip7.workers.dev` for email redirects, and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+
+Publish `firestore.rules` before releasing the frontend. The rules allow the optional, immutable `sourceId` used to restore readings whose legacy IDs collided. They also cover the account-specific document that coordinates imports with **Clear History**. Publish the rules in **Firestore → Rules**, or run the following command from this directory while signed in to the project.
+
+```sh
+firebase deploy --only firestore:rules --project arcana-journal
+```
+
+The account and security-rule integration tests run against local emulators in a Chromium browser. With the Firebase CLI, Java 21, and the Playwright Chromium browser installed, run:
+
+```sh
+firebase emulators:exec --only auth,firestore --project demo-arcana-journal "npm run test:cloud"
+```
+
+Build with `npm run build` and publish `dist` to the existing Cloudflare Workers static-assets deployment at [Arcana Journal](https://arcana-journal.jacobskip7.workers.dev). The Pages instructions below apply to new Pages installations.
 
 ## Offline behavior and updates
 
 `scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
 
-Once the interface reports **Ready for offline use**, new pulls, meanings, reveals, and saved history work without a network connection. Web Crypto works offline in the installed secure context. Asset caching needs one successful online load first, including an online launch of the Home Screen app if it uses separate storage. Browsers can evict caches later, so no website can guarantee storage forever.
+After **Ready for offline use** appears, guests can draw, reveal, and revisit saved readings offline. Trusted-device accounts can use cached readings and sync changes after reconnecting. Asset caching needs one successful online load first, including a launch of the Home Screen app if it uses separate storage. Browsers can evict cached data.
 
 Navigation and built assets are served from the active worker's own versioned cache. Updates install in the background and wait for all old app tabs/windows to close. There is no automatic `skipWaiting`, forced reload, or draw on update. When the interface announces an available update, finish your reading, close every Arcana Journal Safari tab and the standalone app, then reopen. Persisted identities and orientations remain unchanged. A simple refresh may keep the old worker active; closing all clients allows the new one to activate.
 

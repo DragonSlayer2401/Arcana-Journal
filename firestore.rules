@@ -1,0 +1,70 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function verifiedOwner(userId) {
+      return request.auth != null && request.auth.uid == userId
+        && request.auth.token.email_verified == true;
+    }
+    match /users/{userId}/journalOperations/clear {
+      allow get: if verifiedOwner(userId);
+      allow create, update: if verifiedOwner(userId)
+        && request.resource.data.keys().hasOnly(['token', 'active'])
+        && request.resource.data.active is bool
+        && request.resource.data.token is string
+        && request.resource.data.token.matches('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+    }
+    match /users/{userId}/readings/{readingId} {
+      function knownCards(cards) {
+        return cards.hasOnly([
+          'major-00', 'major-01', 'major-02', 'major-03',
+          'major-04', 'major-05', 'major-06', 'major-07',
+          'major-08', 'major-09', 'major-10', 'major-11',
+          'major-12', 'major-13', 'major-14', 'major-15',
+          'major-16', 'major-17', 'major-18', 'major-19',
+          'major-20', 'major-21', 'minor-wands-01', 'minor-wands-02',
+          'minor-wands-03', 'minor-wands-04', 'minor-wands-05', 'minor-wands-06',
+          'minor-wands-07', 'minor-wands-08', 'minor-wands-09', 'minor-wands-10',
+          'minor-wands-11', 'minor-wands-12', 'minor-wands-13', 'minor-wands-14',
+          'minor-cups-01', 'minor-cups-02', 'minor-cups-03', 'minor-cups-04',
+          'minor-cups-05', 'minor-cups-06', 'minor-cups-07', 'minor-cups-08',
+          'minor-cups-09', 'minor-cups-10', 'minor-cups-11', 'minor-cups-12',
+          'minor-cups-13', 'minor-cups-14', 'minor-swords-01', 'minor-swords-02',
+          'minor-swords-03', 'minor-swords-04', 'minor-swords-05', 'minor-swords-06',
+          'minor-swords-07', 'minor-swords-08', 'minor-swords-09', 'minor-swords-10',
+          'minor-swords-11', 'minor-swords-12', 'minor-swords-13', 'minor-swords-14',
+          'minor-pentacles-01', 'minor-pentacles-02', 'minor-pentacles-03', 'minor-pentacles-04',
+          'minor-pentacles-05', 'minor-pentacles-06', 'minor-pentacles-07', 'minor-pentacles-08',
+          'minor-pentacles-09', 'minor-pentacles-10', 'minor-pentacles-11', 'minor-pentacles-12',
+          'minor-pentacles-13', 'minor-pentacles-14'
+        ]);
+      }
+      function validReveals(slots, count) {
+        return slots is list && slots.size() <= count && slots.toSet().size() == slots.size()
+          && slots.hasOnly([0,1,2,3,4,5,6,7,8,9])
+          && (count > 1 || !slots.hasAny([1])) && (count > 2 || !slots.hasAny([2]))
+          && (count > 3 || !slots.hasAny([3])) && (count > 4 || !slots.hasAny([4]))
+          && (count > 5 || !slots.hasAny([5])) && (count > 6 || !slots.hasAny([6]))
+          && (count > 7 || !slots.hasAny([7])) && (count > 8 || !slots.hasAny([8]))
+          && (count > 9 || !slots.hasAny([9]));
+      }
+      function validReading(r) {
+        return r.keys().hasOnly(['id','sourceId','createdAt','createdAtMs','question','cardIds','orientations','revealedSlots'])
+          && r.id is string && r.id.size() > 0
+          && (!('sourceId' in r) || (r.sourceId is string && r.sourceId.size() > 0))
+          && readingId == hashing.sha256(r.id.toUtf8()).toHexString().lower()
+          && r.createdAt is string && r.createdAtMs is int && r.question is string
+          && r.cardIds is list && r.cardIds.size() >= 1 && r.cardIds.size() <= 10
+          && r.cardIds.toSet().size() == r.cardIds.size() && knownCards(r.cardIds)
+          && r.orientations is list && r.orientations.size() == r.cardIds.size()
+          && r.orientations.hasOnly(['upright','reversed'])
+          && validReveals(r.revealedSlots, r.cardIds.size());
+      }
+      allow read, delete: if verifiedOwner(userId);
+      allow create: if verifiedOwner(userId) && validReading(request.resource.data);
+      allow update: if verifiedOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revealedSlots'])
+        && validReveals(request.resource.data.revealedSlots, resource.data.cardIds.size())
+        && request.resource.data.revealedSlots.hasAll(resource.data.revealedSlots);
+    }
+  }
+}
