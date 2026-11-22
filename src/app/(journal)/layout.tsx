@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import { connection } from 'next/server';
-import JournalShell from './JournalShell';
+import Journal from '@/features/Journal/Journal';
 
-export default async function JournalLayout({ children }: { children: ReactNode }) {
+const JournalLayout = async ({ children }: { children: ReactNode }) => {
   await connection();
-  return <JournalShell>{children}</JournalShell>;
-}
+  return <Journal>{children}</Journal>;
+};
+
+export default JournalLayout;

@@ -8,9 +8,18 @@ Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
 
 The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. Each page supplies its own title, description and public content. The initial HTML includes the reading form, the 78-card library, the journal loading state or the requested account form. After hydration, Firebase Authentication restores the browser session. Firestore loads when a verified account opens its journal. Draws and private readings stay on the device or in the signed-in account.
 
+## Project layout
+
+- `src/features/Tarot/` owns the deck and card artwork components. Its Reading and DeckCatalog features implement the draw and browse workflows.
+- `src/features/Journal/` owns the shared journal session, history, guest storage, account sync, and backup transfer.
+- `src/features/Account/` owns sign-in, signup, password reset, verification, and journal lock controls.
+- `src/app/` connects public URLs and page metadata to those features. Firebase adapters and account and journal operations live under `src/services/`.
+
+Feature styles live in the owning feature’s `assets/` folder. Feature tests live in `__tests__/` folders alongside the workflows they cover. The end-to-end checks that span the app live in `tests/`.
+
 ## Run it
 
-Install [Node.js](https://nodejs.org/) 22.12 or later (Node 24 LTS is suitable), then open a terminal in this folder:
+Install [Node.js](https://nodejs.org/) 24.12.0 or later, then run these commands from the project folder.
 
 ```sh
 npm ci
@@ -49,7 +58,7 @@ Build first with `npm run build`. The browser suites start their own local produ
 
 ## Random selection
 
-`src/domain/random.ts` contains the selection code and does not import the UI or card meanings. Its only entropy source is `globalThis.crypto.getRandomValues()`. The optional question is journal text; it is never passed to the draw function.
+`src/features/Tarot/features/Reading/utils/random.ts` contains the selection code and does not import the UI or card meanings. Its only entropy source is `globalThis.crypto.getRandomValues()`. The optional question is journal text; it is never passed to the draw function.
 
 For each integer bound `n`, the implementation validates an integer in `[1, 2 ** 32]`, reads an unsigned 32-bit value, and calculates:
 
@@ -67,7 +76,7 @@ The accurate description is **cryptographically secure random draws with unbiase
 
 ## Data and artwork
 
-`src/data/deck.ts` includes all 22 Major Arcana and 56 Minor Arcana: Wands, Cups, Swords, and Pentacles, each Ace–Ten, Page, Knight, Queen, King. IDs are stable and unique. Meanings use original concise wording summarizing traditional associations, with distinct fixed upright and reversed entries.
+`src/features/Tarot/data/deck.ts` includes all 22 Major Arcana and 56 Minor Arcana: Wands, Cups, Swords, and Pentacles, each Ace–Ten, Page, Knight, Queen, King. IDs are stable and unique. Meanings use original concise wording summarizing traditional associations, with distinct fixed upright and reversed entries.
 
 All 78 card faces are bundled locally as 768 × 1152 WebP illustrations in `public/cards/`, keyed by the stable card IDs. They reinterpret the public-domain Rider–Waite–Smith scenes by Pamela Colman Smith in the user's supplied visual direction: angular forms, jewel tones, flowing patterns, and painted texture. They were created ahead of time with the built-in image-generation tool. There is no runtime image generation, interpretation service, API key, or extra fee to use these bundled images. Each card's complete portrait is visible; reversed artwork rotates while names and meanings stay upright. Original symbolic SVG artwork remains available as a defensive loading fallback.
 
@@ -123,7 +132,7 @@ Publish `firestore.rules` before releasing the frontend. The rules allow the opt
 firebase deploy --only firestore:rules --project arcana-journal
 ```
 
-The account and security-rule integration tests run against local emulators in a Chromium browser. With the Firebase CLI, Java 21, and the Playwright Chromium browser installed, run:
+The account and security-rule integration tests use the local Firebase emulators. Install the Firebase CLI, Java 21, and both Playwright browsers (`npx playwright install chromium webkit`), then run:
 
 ```sh
 firebase emulators:exec --only auth,firestore --project demo-arcana-journal "npm run test:cloud"
@@ -131,7 +140,7 @@ firebase emulators:exec --only auth,firestore --project demo-arcana-journal "npm
 
 ## Offline behavior and updates
 
-`scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
+`scripts/build-sw.mjs` enumerates the actual built assets and derives the cache version from their paths and contents. The worker caches the application shell, compiled code, styles, card data/artwork, manifest, and icons. Each downloaded asset's SHA-256 digest must match the build before installation succeeds. `src/utils/pwa.ts` asks the controlling worker to confirm that every required cache entry is present before the interface reports offline readiness. A missing or failed asset does not produce a ready status. Readiness is rechecked when the app regains focus or comes online.
 
 After **Ready for offline use** appears, guests can draw, reveal, and revisit saved readings offline. Trusted-device accounts can use cached readings and sync changes after reconnecting. Asset caching needs one successful online load first, including a launch of the Home Screen app if it uses separate storage. Browsers can evict cached data.
 

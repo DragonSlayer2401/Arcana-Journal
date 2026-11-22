@@ -2,11 +2,14 @@
 
 ## Project overview
 
-BitcoinTracker is a Next.js App Router application for Kalshi Bitcoin forecasts, research, and
-simulated trading. It uses React, JavaScript/JSX, React Bootstrap, SCSS, Redux Toolkit, and RTK Query.
-Use pnpm; `package.json` defines the current dependencies and commands.
+Arcana Journal is a Next.js App Router application for tarot readings, deck browsing, and private
+journaling. It uses React, TypeScript, SCSS, and Firebase Authentication and Firestore. Guests can
+use the journal offline. Verified accounts can sync readings across devices.
 
-Jest and Testing Library verify behavior. Prettier owns formatting.
+Use npm with the checked-in `package-lock.json`. Install dependencies with `npm ci`.
+Vitest and Testing Library cover feature behavior. Node’s test runner covers the service worker and
+Firebase emulator scenarios. Playwright checks the production app in desktop and mobile browsers.
+Prettier owns formatting.
 
 ## General rules
 
@@ -22,8 +25,8 @@ Jest and Testing Library verify behavior. Prettier owns formatting.
 - Search existing code for reusable behavior. Choose its owner using the architecture standard.
 - Keep UI semantic and keyboard accessible, meeting WCAG 2.2 AA. Preserve server/client boundaries
   and never expose credentials or sensitive data in source, logs, or reports.
-- Protect saved forecasts, research evidence, and account history. Use isolated test storage;
-  routine verification must not mutate the working research database or start paid experiments.
+- Protect saved readings, journal backups, and account history. Use isolated browser storage for
+  tests and the local Firebase emulators for cloud verification.
 - Clarify ambiguous requirements before risky or broad changes. Explain material concerns and
   recommend a better approach before implementing a problematic proposal.
 
@@ -63,11 +66,11 @@ verify claims about existing behavior and to trace consumers during a migration.
 ## Completion requirements
 
 - Check the final diff against the request and preserve unrelated work.
-- Run the owning tests after behavior changes, then
-  `pnpm test`, `pnpm format:check`, and `pnpm build`. Verify UI changes at desktop and mobile sizes.
-  Report targeted tests, full regression, formatting, build, and applicable browser/data checks
-  separately; identify anything not run and why. Passing tests does not establish forecast accuracy
-  or trading profitability.
+- Run the owning tests after behavior changes, then `npm test`, `npm run typecheck`,
+  `npm run format:check`, and `npm run build`. Verify UI changes at desktop and mobile sizes.
+  See the README for browser, offline-update, and Firebase emulator commands. Report targeted tests,
+  full regression, formatting, build, and applicable browser or data checks separately. Identify
+  anything not run and why.
 - For documentation-only changes, verify claims, linked files and headings, and formatting. Runtime
   tests, builds, and browser checks are unnecessary unless executable behavior also changes.
 - Summarize what changed, why, verification results, and unresolved issues. Respect requested review
