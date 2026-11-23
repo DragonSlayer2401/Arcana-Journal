@@ -1,4 +1,9 @@
-import type { Reading, Settings } from '../readingTypes';
+import type { Reading, ReadingPreferences, Settings } from '../readingTypes';
+
+export const defaultReadingPreferences: ReadingPreferences = {
+  reversals: false,
+  instantReveal: false,
+};
 
 export interface AppData {
   version: 1;
@@ -9,7 +14,7 @@ export interface AppData {
 }
 export const freshData = (): AppData => ({
   version: 1,
-  settings: { mode: 'three', customCount: 5, reversals: false, instantReveal: false },
+  settings: { mode: 'three', customCount: 5, ...defaultReadingPreferences },
   readings: [],
   activeId: null,
   awaitingNewReading: false,

@@ -15,7 +15,12 @@ import {
 } from '../features/GuestJournal/hooks/useGuestJournal';
 import type { GuestDraft } from '../features/GuestJournal/utils/guestDraft';
 import { sameReadingContent } from '../utils/readingIdentity';
-import { freshData, readSettings, type AppData } from '../utils/journalData';
+import {
+  defaultReadingPreferences,
+  freshData,
+  readSettings,
+  type AppData,
+} from '../utils/journalData';
 import { loadData } from '../features/GuestJournal/utils/guestStorage';
 import {
   isJournalLocked,
@@ -25,7 +30,8 @@ import {
 } from '@/services/Account/account.service';
 import { reviewAccountClear, type AccountClearReview } from '@/services/Journal/journal.service';
 import { useAccountJournal } from '../features/AccountJournal/hooks/useAccountJournal';
-import type { Reading, Settings } from '../readingTypes';
+import { useReadingPreferences } from '@/features/Account/hooks/useReadingPreferences';
+import type { Reading, ReadingPreferences, Settings } from '../readingTypes';
 import { subscribeOfflineStatus } from '@/utils/pwa';
 
 const sessionKey = (uid: string) => `arcana.reading-view.${uid}`;
@@ -36,7 +42,8 @@ const loadAccountView = (uid: string) => {
     if (view) {
       if (typeof view.activeId === 'string') data.activeId = view.activeId;
       data.awaitingNewReading = view.awaitingNewReading === true || Boolean(data.activeId);
-      data.settings = readSettings(view.settings) ?? data.settings;
+      data.settings =
+        readSettings({ ...view.settings, ...defaultReadingPreferences }) ?? data.settings;
     }
   } catch {
     /* Tab storage is optional. */
@@ -66,6 +73,8 @@ export const useJournalController = ({ user, journalUid, guestDraft }: JournalSe
     () => 'open',
   );
   const locked = lockScope !== 'open';
+  const profile = useReadingPreferences(locked ? undefined : uid);
+  const drawDisabled = opening || locked || Boolean(uid && !profile.ready);
   // The server and the first client render use the same public view. Only the
   // resolved browser session may read device storage or subscribe to private data.
   const [initial] = useState(() =>
@@ -168,11 +177,15 @@ export const useJournalController = ({ user, journalUid, guestDraft }: JournalSe
       return;
     }
     const next = change(dataRef.current);
-    const { settings, activeId, awaitingNewReading } = next;
+    const {
+      activeId,
+      awaitingNewReading,
+      settings: { mode, customCount },
+    } = next;
     try {
       sessionStorage.setItem(
         sessionKey(journalUid),
-        JSON.stringify({ settings, activeId, awaitingNewReading }),
+        JSON.stringify({ settings: { mode, customCount }, activeId, awaitingNewReading }),
       );
     } catch {
       /* Reading data is saved separately in Firestore. */
@@ -180,12 +193,20 @@ export const useJournalController = ({ user, journalUid, guestDraft }: JournalSe
     dataRef.current = next;
     setData(next);
   };
-  const updateSettings = (patch: Partial<Settings>) => {
+  const updateSpread = (patch: Partial<Pick<Settings, 'mode' | 'customCount'>>) => {
     commit((current) => ({ ...current, settings: { ...current.settings, ...patch } }));
+  };
+  const updatePreference = (key: keyof ReadingPreferences, value: boolean) => {
+    if (drawDisabled) return;
+    if (uid) {
+      void profile.update(key, value);
+      return;
+    }
+    guest.updatePreference(key, value);
   };
   const draw = (createReading: (settings: Settings, question: string) => Reading) => {
     if (
-      opening ||
+      drawDisabled ||
       drawLocked.current ||
       dataRef.current.activeId ||
       dataRef.current.awaitingNewReading
@@ -194,7 +215,9 @@ export const useJournalController = ({ user, journalUid, guestDraft }: JournalSe
     drawLocked.current = true; // Synchronous guard also blocks taps before React commits.
     setError('');
     try {
-      const result = createReading(dataRef.current.settings, question);
+      const settings = dataRef.current.settings;
+      const preferences = uid ? profile.getPreferences() : guest.getPreferences();
+      const result = createReading({ ...settings, ...preferences }, question);
       if (journalUid) account.saveDraw(result);
       commit((current) => ({
         ...current,
@@ -297,7 +320,12 @@ export const useJournalController = ({ user, journalUid, guestDraft }: JournalSe
     data,
     question,
     setQuestion,
-    updateSettings,
+    updateSpread,
+    preferences: uid ? profile.preferences : guest.preferences,
+    preferenceWarning: uid ? profile.warning : guest.preferenceWarning,
+    retryPreferenceSync: uid ? profile.retry : undefined,
+    updatePreference,
+    drawDisabled,
     draw,
     newReading,
     reveal,

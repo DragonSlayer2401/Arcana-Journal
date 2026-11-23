@@ -6,7 +6,7 @@ Open **Deck** to browse all 78 illustrations by Major Arcana or suit. Search by 
 
 Open [Arcana Journal on Vercel](https://arcana-journal-theta.vercel.app/).
 
-The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. Each page supplies its own title, description and public content. The initial HTML includes the reading form, the 78-card library, the journal loading state or the requested account form. After hydration, Firebase Authentication restores the browser session. Firestore loads when a verified account opens its journal. Draws and private readings stay on the device or in the signed-in account.
+The Next.js App Router renders Reading (`/`), Deck (`/deck`), Journal (`/journal`), and the three account forms (`/login`, `/signup`, `/reset-password`) on each direct request. Each page supplies its own title, description and public content. The initial HTML includes the reading form, the 78-card library, the journal loading state or the requested account form. After hydration, Firebase Authentication restores the browser session. Signed-in accounts load their reading preferences from Firestore. Verified accounts also sync their journal readings.
 
 ## Project layout
 
@@ -84,6 +84,10 @@ The source/license record is `art/references/sources.json`, and generation promp
 
 ## Journal accounts and backups
 
+**Include reversals** and **Reveal cards instantly** are off by default. While signed in, changing either toggle saves it to your profile and updates your other devices. While signed out, the browser remembers its own choices in local storage. Signing out restores those guest choices.
+
+If a profile save fails, your selections still apply to new readings in the current tab. Choose **Retry preference sync** to save those selections to your account.
+
 Choose **Sign in** (`/login`) or **Create account** (`/signup`) to open a dialog over your current screen. Close it or press Escape to return to your reading, Deck filters, or Journal. Opening either address directly shows the dialog over Journal. **Forgot password?** switches the dialog to password reset, and `/reset-password` also opens as a standalone form.
 
 New accounts use the guest journal on this device until you follow the verification link in your email and choose **Check verification** in Journal. Once verified, new readings sync to your account. Select the trusted-device option at sign-in to keep cached account readings and pending changes through a browser restart. On a shared device, keep this option off and wait for changes to sync before closing the tab or signing out.
@@ -124,7 +128,7 @@ When upgrading, let **Clear History** and queued changes finish in older tabs be
 
 ### Firebase setup for this deployment
 
-The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` require a verified email and restrict access to the account that owns the readings.
+The app uses the Firebase project `arcana-journal`. Enable **Email/Password** under Authentication and create the **Standard** Firestore database with ID `(default)` in production mode. The web configuration ships with the app. The rules in `firestore.rules` let signed-in users read and update the two reading preferences on their own profile at `users/{uid}`. Access to journal readings also requires a verified email.
 
 Verification and password-reset emails return to `/journal` on the hostname that requested them. The production hostname `arcana-journal-theta.vercel.app` belongs in **Authentication → Settings → Authorized domains** in Firebase. If you test email actions on a Vercel preview, authorize that preview hostname too. [Firebase email action domains](https://firebase.google.com/docs/auth/web/passing-state-in-email-actions)
 

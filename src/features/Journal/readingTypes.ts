@@ -15,3 +15,5 @@ export interface Settings {
   reversals: boolean;
   instantReveal: boolean;
 }
+
+export type ReadingPreferences = Pick<Settings, 'reversals' | 'instantReveal'>;

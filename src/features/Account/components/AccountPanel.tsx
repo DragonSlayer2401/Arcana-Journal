@@ -100,8 +100,8 @@ export const AccountPanel = ({ user, syncStatus, signOutDisabled, onLock }: Prop
       {user && !user.emailVerified && (
         <div className="account-verification">
           <p>
-            Open the verification link in your email, then choose Check verification to enable sync.
-            If you need a new link, choose Send verification email.
+            Open the verification link in your email, then choose Check verification to sync your
+            readings. If you need a new link, choose Send verification email.
           </p>
           <div className="account-actions">
             <button

@@ -26,7 +26,7 @@ export const authenticate = async (
   page,
   address,
   secret,
-  { signup = false, trust = false, waitForSync = true } = {},
+  { signup = false, trust = false, verifyEmail = true, waitForSync = true } = {},
 ) => {
   await page.goto(base + (signup ? '/signup' : '/login'));
   await page.getByLabel('Email address').fill(address);
@@ -37,7 +37,7 @@ export const authenticate = async (
     .getByRole('button', { name: signup ? 'Create account' : 'Sign in', exact: true })
     .click();
   await expect(page.getByRole('heading', { name: address })).toBeVisible();
-  if (signup) {
+  if (signup && verifyEmail) {
     await verifyEmulatorEmail(address);
     await page.getByRole('button', { name: 'Check verification' }).click();
   }

@@ -15,9 +15,7 @@ export const loadFirestoreSdk = async () => {
   throw new Error('Journal accounts require a browser.');
 };
 
-// Every Firestore operation follows databaseFor(), which loads the SDK once
-// before creating the verified owner's database. Writes keep their original
-// synchronous dispatch order even when the user is offline.
+// The database accessors load the SDK before returning a Firestore client.
 export const firestoreSdk = (): FirestoreSdk => {
   if (!firestore) throw new Error('The account journal database has not been opened.');
   return firestore;

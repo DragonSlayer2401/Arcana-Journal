@@ -1,5 +1,6 @@
 import {
   mockJournal,
+  mockPreferences,
   firstUser,
   firstReading,
   mount,
@@ -80,7 +81,17 @@ describe('syncing account readings', () => {
     );
     const app = mount('/');
     await user.click(screen.getByRole('checkbox', { name: /Reveal cards instantly/ }));
+    expect(mockPreferences.saveReadingPreference).toHaveBeenCalledWith(
+      firstUser.uid,
+      'instantReveal',
+      true,
+    );
     app.unmount();
+    sessionStorage.clear();
+    mockPreferences.observeReadingPreferences.mockImplementationOnce((_uid, listener) => {
+      listener({ reversals: false, instantReveal: true });
+      return () => {};
+    });
     mount('/');
     expect(screen.getByRole('checkbox', { name: /Reveal cards instantly/ })).toBeChecked();
     await user.click(screen.getByRole('button', { name: /Draw Cards/ }));
