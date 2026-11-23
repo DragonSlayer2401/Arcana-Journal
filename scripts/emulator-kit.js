@@ -1,7 +1,8 @@
 import * as account from '../src/services/Account/account.service';
+import * as readingPreferences from '../src/services/Account/ReadingPreferences/readingPreferences.service';
 import * as journalOperations from '../src/services/Journal/journal.service';
 
-export const journal = { ...account, ...journalOperations };
+export const journal = { ...account, ...readingPreferences, ...journalOperations };
 export { databaseFor } from '../src/services/Account/account.service';
 export { getAuth } from 'firebase/auth';
 export * as firestore from 'firebase/firestore';

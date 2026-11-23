@@ -1,5 +1,6 @@
 // The suites share one emulator app and register with the same node:test runner.
 import '../src/features/Account/features/AccountAccess/__tests__/ManageAccount/SignOutAcrossTabs.emulator.test.mjs';
+import '../src/features/Tarot/features/Reading/__tests__/ReadingPreferences/SyncReadingPreferences.emulator.test.mjs';
 import '../src/features/Journal/features/AccountJournal/__tests__/ClearHistory/ClearAccountHistory.emulator.test.mjs';
 import '../src/features/Journal/features/JournalTransfer/__tests__/ExportReadings/ExportDuringChanges.emulator.test.mjs';
 import '../src/features/Journal/features/JournalTransfer/__tests__/ImportReadings/VerifyGuestImport.emulator.test.mjs';

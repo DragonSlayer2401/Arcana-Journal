@@ -32,7 +32,7 @@ export const ReadingForm = ({ children }: { children: ReactNode }) => {
 };
 
 export const SpreadSelector = () => {
-  const { opening, data, updateSettings } = useJournalSession();
+  const { opening, data, updateSpread } = useJournalSession();
   return (
     <>
       <fieldset disabled={opening}>
@@ -44,7 +44,7 @@ export const SpreadSelector = () => {
               key={mode}
               aria-pressed={data.settings.mode === mode}
               className={data.settings.mode === mode ? 'mode-option selected' : 'mode-option'}
-              onClick={() => updateSettings({ mode })}
+              onClick={() => updateSpread({ mode })}
             >
               <span className="mode-glyph" aria-hidden="true">
                 {glyph}
@@ -61,7 +61,7 @@ export const SpreadSelector = () => {
           <select
             disabled={opening}
             value={data.settings.customCount}
-            onChange={(event) => updateSettings({ customCount: Number(event.target.value) })}
+            onChange={(event) => updateSpread({ customCount: Number(event.target.value) })}
           >
             {Array.from({ length: 10 }, (_, i) => (
               <option key={i + 1} value={i + 1}>
@@ -91,7 +91,7 @@ export const QuestionInput = () => {
 };
 
 export const DrawControls = () => {
-  const { opening, data, updateSettings } = useJournalSession();
+  const { drawDisabled, data, preferences, updatePreference } = useJournalSession();
   return (
     <>
       {drawOptions.map(({ key, label, hint }) => (
@@ -102,14 +102,14 @@ export const DrawControls = () => {
           </span>
           <input
             type="checkbox"
-            disabled={opening}
-            checked={data.settings[key]}
-            onChange={(event) => updateSettings({ [key]: event.target.checked })}
+            disabled={drawDisabled}
+            checked={preferences[key]}
+            onChange={(event) => updatePreference(key, event.target.checked)}
           />
           <span className="switch" aria-hidden="true" />
         </label>
       ))}
-      <button disabled={opening} type="submit" className="button button-gold draw-button">
+      <button disabled={drawDisabled} type="submit" className="button button-gold draw-button">
         <Icon name="spark" /> Draw Cards{' '}
         <span className="button-count">{getSpreadCount(data.settings)}</span>
       </button>

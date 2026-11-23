@@ -54,10 +54,10 @@ for (const viewport of desktopViewports) {
       await expectPageToFit(page);
 
       await page.getByRole('banner').getByRole('link', { name: 'Create account' }).click();
-      await page.getByLabel('Email address').fill('reader@example.test');
-      await page.getByLabel('Password', { exact: true }).fill('example-password');
-      await page.getByLabel('Confirm password').fill('different-password');
       const signup = page.getByRole('dialog', { name: 'Create account' });
+      await signup.getByLabel('Email address').fill('reader@example.test');
+      await signup.getByLabel('Password', { exact: true }).fill('example-password');
+      await signup.getByLabel('Confirm password').fill('different-password');
       await signup.getByRole('button', { name: 'Create account' }).click();
       await expect(signup.getByRole('alert')).toContainText('Passwords don’t match');
       await expectStackedFields(signup, 3);

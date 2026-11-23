@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import type userEvent from '@testing-library/user-event';
 import { beforeEach, vi } from 'vitest';
 import * as account from '@/services/Account/account.service';
+import * as preferences from '@/services/Account/ReadingPreferences/readingPreferences.service';
 import * as journal from '@/services/Journal/journal.service';
 import { freshData } from '@/features/Journal/utils/journalData';
 import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorage';
@@ -10,6 +11,10 @@ import type { Reading } from '@/features/Journal/readingTypes';
 import { TestApp, TestRouter } from './TestRouter';
 
 vi.mock('@/utils/pwa', () => ({ subscribeOfflineStatus: () => () => {} }));
+vi.mock('@/services/Account/ReadingPreferences/readingPreferences.service', () => ({
+  observeReadingPreferences: vi.fn(),
+  saveReadingPreference: vi.fn(),
+}));
 vi.mock('@/services/Account/account.service', () => ({
   observeAccount: vi.fn(),
   signIn: vi.fn(),
@@ -70,6 +75,7 @@ export const mount = (path = '/journal') =>
 export const goToJournal = (user: ReturnType<typeof userEvent.setup>) =>
   user.click(screen.getByRole('link', { name: /^Journal/ }));
 export const mockAccount = vi.mocked(account);
+export const mockPreferences = vi.mocked(preferences);
 export const mockJournal = vi.mocked(journal);
 let signedIn: account.JournalUser | null;
 let accountListener: Parameters<typeof account.observeAccount>[0];
@@ -101,6 +107,11 @@ beforeEach(() => {
   records.set(firstUser.uid, [firstReading]);
   records.set(nextUser.uid, [nextReading]);
   signedIn = null;
+  mockPreferences.observeReadingPreferences.mockImplementation((_uid, listener) => {
+    listener({ reversals: false, instantReveal: false });
+    return () => {};
+  });
+  mockPreferences.saveReadingPreference.mockResolvedValue(undefined);
   mockAccount.isJournalLocked.mockReturnValue(false);
   mockAccount.observeJournalLock.mockImplementation(() => () => {});
   mockJournal.observePendingDeletions.mockImplementation(() => () => {});
