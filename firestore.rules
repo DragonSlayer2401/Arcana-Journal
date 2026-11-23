@@ -1,9 +1,27 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function owner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
     function verifiedOwner(userId) {
-      return request.auth != null && request.auth.uid == userId
-        && request.auth.token.email_verified == true;
+      return owner(userId) && request.auth.token.email_verified == true;
+    }
+    match /users/{userId} {
+      function validPreferences(preferences) {
+        return preferences is map
+          && preferences.keys().hasOnly(['reversals', 'instantReveal'])
+          && preferences.keys().size() > 0
+          && preferences.get('reversals', false) is bool
+          && preferences.get('instantReveal', false) is bool;
+      }
+      allow get: if owner(userId);
+      allow create: if owner(userId)
+        && request.resource.data.keys().hasOnly(['readingPreferences'])
+        && validPreferences(request.resource.data.readingPreferences);
+      allow update: if owner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readingPreferences'])
+        && validPreferences(request.resource.data.readingPreferences);
     }
     match /users/{userId}/journalOperations/clear {
       allow get: if verifiedOwner(userId);

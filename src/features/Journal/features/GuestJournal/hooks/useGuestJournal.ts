@@ -19,6 +19,7 @@ import {
   guestStorageKey,
 } from '../utils/guestStorage';
 import { waitForGuestWrites, withGuestWrite } from '../utils/guestWrite';
+import { useGuestPreferences } from './useGuestPreferences';
 
 export const guestReadingChanged =
   'This reading changed in another tab. Review the journal and confirm again.';
@@ -44,6 +45,7 @@ export const useGuestJournal = ({
   setWarning,
   invalidateDownloads,
 }: GuestSession) => {
+  const preferences = useGuestPreferences(isGuest, dataRef.current.settings);
   const guestViewVersion = useRef(0);
   const [guestClearStatus, setGuestClearStatus] = useState('');
   const [pendingGuestDeletes, setPendingGuestDeletes] = useState<Reading[]>([]);
@@ -254,5 +256,5 @@ export const useGuestJournal = ({
       invalidateDownloads();
     });
   };
-  return { commit, remove, visibleReadings, updateGuestReadings, guestClearStatus };
+  return { ...preferences, commit, remove, visibleReadings, updateGuestReadings, guestClearStatus };
 };

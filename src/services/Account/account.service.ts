@@ -2,7 +2,7 @@ import type { FirebaseApp } from 'firebase/app';
 import type { Auth, Persistence, User } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
 import { browserAuthSdk, firestoreSdk, loadFirestoreSdk } from '../Firebase/firebaseSdk';
-import { signOutWithoutPendingEdits } from '../Journal/journalActivity';
+import { holdJournalEdits, signOutWithoutPendingEdits } from '../Journal/journalActivity';
 import { countSavedDeletions, hasPendingDeletion } from '../Journal/Deletions/deletionQueue';
 import {
   eraseOfflineCache,
@@ -707,6 +707,27 @@ const releaseAccount = () => {
 
 const trustedAppName = (uid: string) => 'journal-' + uid + '-device';
 
+let profileDatabase: Firestore | undefined;
+const usesJournalDatabase = (owner: User) =>
+  owner.emailVerified && hasVerifiedCachedToken(journalCredentials(owner));
+
+export const profileDatabaseFor = async (uid: string): Promise<Firestore> => {
+  const owner = requireAccount(uid);
+  if (usesJournalDatabase(owner)) return databaseFor(uid);
+
+  // Before verification, profile preferences use the signed-in Auth app.
+  // Its memory cache is separate from every verified user's offline journal.
+  const firestore = await loadFirestoreSdk();
+  requireAccount(uid);
+  if (!profileDatabase) {
+    profileDatabase = firestore.initializeFirestore(getBrowserAuth().app, {
+      localCache: firestore.memoryLocalCache(),
+    });
+    if (useEmulators) firestore.connectFirestoreEmulator(profileDatabase, '127.0.0.1', 8080);
+  }
+  return profileDatabase;
+};
+
 export const databaseFor = (uid: string): Promise<Firestore> => {
   const auth = getBrowserAuth();
   const user = requireVerifiedAccount(uid);
@@ -1151,6 +1172,36 @@ export const trackWrite = <T>(uid: string, operation: Promise<T>): Promise<T> =>
   operation.then(finished, finished);
   return operation;
 };
+
+export const trackProfileWrite = (uid: string, operation: Promise<void>) => {
+  if (!isOfflineJournalEnabled(uid)) return trackWrite(uid, operation);
+  const owner = requireAccount(uid);
+  const login = currentLogin(owner);
+  const usesJournal = usesJournalDatabase(owner);
+  const release = holdJournalEdits(uid);
+  let unsubscribe: (() => void) | undefined;
+  // A forced account change can terminate Firestore without settling its write
+  // promise. Release this login's sign-out guard when its session ends, too.
+  const sessionEnded = new Promise<never>((_, reject) => {
+    unsubscribe = browserAuthSdk().onIdTokenChanged(getBrowserAuth(), (user) => {
+      if (
+        !user ||
+        !sameLogin(currentLogin(user), login) ||
+        (usesJournal && !usesJournalDatabase(user))
+      ) {
+        reject(new Error('The journal account has changed. Please retry.'));
+      }
+    });
+  });
+  return trackWrite(
+    uid,
+    Promise.race([operation, sessionEnded]).finally(() => {
+      unsubscribe?.();
+      release();
+    }),
+  );
+};
+
 export const signOutAccount = async (displayedUid?: string) => {
   const auth = getBrowserAuth();
   const user = auth.currentUser;

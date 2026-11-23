@@ -1040,6 +1040,97 @@ test(
   },
 );
 
+test('reading preferences sync across devices and only the owner can access them', async (t) => {
+  const first = await browser.newContext();
+  const second = await browser.newContext();
+  t.after(() => Promise.all([first.close(), second.close()]));
+  const phone = await open(first);
+  const laptop = await open(second);
+  const email = 'reading-preferences-' + randomUUID() + '@example.test';
+  const uid = await phone.evaluate(
+    async ({ email, password }) => {
+      await window.kit.journal.signUp(email, password);
+      return (await window.observeUser()).uid;
+    },
+    { email, password },
+  );
+  assert.equal(await account(laptop, email, false, false), uid);
+  await laptop.evaluate((uid) => {
+    window.kit.journal.observeReadingPreferences(
+      uid,
+      (preferences) => {
+        window.preferences = preferences;
+      },
+      (error) => {
+        throw error;
+      },
+    );
+  }, uid);
+  await laptop.waitForFunction(
+    () => window.preferences?.instantReveal === false && window.preferences.reversals === false,
+  );
+  const save = (page, key, value) =>
+    page.evaluate(
+      ({ uid, key, value }) => window.kit.journal.saveReadingPreference(uid, key, value),
+      { uid, key, value },
+    );
+  await Promise.all([save(phone, 'reversals', true), save(laptop, 'instantReveal', true)]);
+  await laptop.waitForFunction(
+    () => window.preferences?.instantReveal && window.preferences.reversals,
+  );
+  await verifyAccount(phone, email);
+  await save(phone, 'reversals', false);
+  await laptop.waitForFunction(
+    () => window.preferences?.instantReveal && window.preferences.reversals === false,
+  );
+
+  const denied = await laptop.evaluate(async (uid) => {
+    const { firestore, journal } = window.kit;
+    const db = await journal.profileDatabaseFor(uid);
+    const profile = firestore.doc(db, 'users', uid);
+    const other = firestore.doc(db, 'users', uid + '-other');
+    const code = async (operation) =>
+      operation.then(
+        () => 'allowed',
+        (error) => error.code,
+      );
+    const valid = { readingPreferences: { reversals: true } };
+    const operations = [
+      firestore.getDocFromServer(other),
+      firestore.setDoc(other, valid),
+      firestore.getDocsFromServer(profile.parent),
+      firestore.setDoc(profile, { ...valid, extra: true }),
+      firestore.setDoc(profile, { readingPreferences: { instantReveal: 1 } }),
+      firestore.setDoc(profile, { readingPreferences: { reversals: 'yes' } }),
+      firestore.setDoc(profile, { readingPreferences: { mode: 'three' } }),
+      firestore.deleteDoc(profile),
+    ];
+    return Promise.all(operations.map(code));
+  }, uid);
+  assert.deepEqual(denied, Array(8).fill('permission-denied'));
+  await laptop.evaluate((uid) => window.kit.journal.signOutAccount(uid), uid);
+  assert.equal(await laptop.evaluate(() => window.observeUser()), null);
+  // An SDK read can reuse the existing owner's snapshot listener. Check the
+  // server rules with fresh HTTP requests that carry no account credentials.
+  const profileUrl =
+    'http://127.0.0.1:8080/v1/projects/demo-arcana-journal/databases/(default)/documents/users/' +
+    uid;
+  const guestRead = await fetch(profileUrl);
+  const guestWrite = await fetch(profileUrl, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fields: {
+        readingPreferences: { mapValue: { fields: { instantReveal: { booleanValue: true } } } },
+      },
+    }),
+  });
+  for (const response of [guestRead, guestWrite]) {
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.status, 'PERMISSION_DENIED');
+  }
+});
+
 test('clear-operation rules restrict the document, contents and owner', async (t) => {
   const profile = await browser.newContext();
   t.after(() => profile.close());

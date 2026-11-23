@@ -43,6 +43,7 @@ test(
     await first.getByRole('button', { name: /Draw Cards/ }).click();
     await first.getByRole('button', { name: 'Reveal card 1', exact: true }).click();
     await first.getByRole('link', { name: /^Journal/ }).click();
+    assert.equal(firestoreRequests, 0, 'Guest readings should use only the local journal');
     await first.getByRole('main').getByRole('link', { name: 'Create account' }).click();
     await authenticate(first, 'Create account');
     await expect(openReading(first)).toBeVisible();
@@ -80,7 +81,6 @@ test(
     await expect(sibling.getByRole('button', { name: /View card details/ })).toHaveCount(1);
     await sibling.close();
     await first.getByRole('link', { name: /^Journal/ }).click();
-    assert.equal(firestoreRequests, 0, 'An unverified session should use only the local journal');
     await verifyEmulatorEmail(email);
     await first.getByRole('button', { name: 'Check verification' }).click();
     await expect(first.getByRole('button', { name: 'Check verification' })).toHaveCount(0);

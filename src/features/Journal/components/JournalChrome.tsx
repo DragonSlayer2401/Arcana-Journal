@@ -66,7 +66,8 @@ export const AboutButton = () => {
 };
 
 export const JournalNotices = () => {
-  const { account, journalUid, warning } = useJournalSession();
+  const { account, journalUid, warning, preferenceWarning, retryPreferenceSync } =
+    useJournalSession();
   return (
     <>
       {journalUid && account.deleteError && (
@@ -86,6 +87,16 @@ export const JournalNotices = () => {
         <p className="notice warning" role="alert">
           {warning}
         </p>
+      )}
+      {preferenceWarning && (
+        <div className="notice warning" role="alert">
+          {preferenceWarning}{' '}
+          {retryPreferenceSync && (
+            <button type="button" className="button button-secondary" onClick={retryPreferenceSync}>
+              Retry preference sync
+            </button>
+          )}
+        </div>
       )}
     </>
   );
