@@ -29,7 +29,8 @@ interface SavedRecovery {
 interface Props {
   historyRevision?: number;
   accountEmail: string | null;
-  deviceCount: number | 'unsaved';
+  deviceCount: number;
+  unsavedGuestChanges?: boolean;
   recoveryReadings?: Reading[];
   deletionStorageUnreadable?: boolean;
   recoveryComplete?: boolean;
@@ -70,6 +71,7 @@ export const JournalTransferControls = ({
   historyRevision = 0,
   accountEmail,
   deviceCount,
+  unsavedGuestChanges = false,
   recoveryReadings = [],
   deletionStorageUnreadable = false,
   recoveryComplete = true,
@@ -345,9 +347,9 @@ export const JournalTransferControls = ({
           </button>
         </div>
       )}
-      {accountEmail && (deviceCount === 'unsaved' || deviceCount > 0) && (
+      {accountEmail && (unsavedGuestChanges || deviceCount > 0) && (
         <div className="journal-device-import">
-          {deviceCount === 'unsaved' ? (
+          {unsavedGuestChanges ? (
             <>
               <p>
                 This tab has unsaved guest changes. Download a guest backup before closing or
@@ -363,16 +365,18 @@ export const JournalTransferControls = ({
               </button>
             </>
           ) : (
-            <p>This browser has {readingCount(deviceCount)} in its guest journal.</p>
+            <p>Review {readingCount(deviceCount)} from this device’s guest journal for import.</p>
           )}
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={busy}
-            onClick={() => void previewImport('Guest journal on this device', getDeviceReadings)}
-          >
-            Import this device’s journal
-          </button>
+          {deviceCount > 0 && (
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={busy}
+              onClick={() => void previewImport('Guest journal on this device', getDeviceReadings)}
+            >
+              Import this device’s journal
+            </button>
+          )}
         </div>
       )}
       {deletionStorageUnreadable && (

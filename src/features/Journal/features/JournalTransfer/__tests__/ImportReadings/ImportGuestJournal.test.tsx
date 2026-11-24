@@ -11,15 +11,20 @@ import {
   mount,
   goToJournal,
   records,
+  restoreAccountOnMount,
   setAccount,
   publish,
 } from '@/test/accountJournal';
-import { act, screen, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import type { Reading } from '@/features/Journal/readingTypes';
 import { freshData } from '@/features/Journal/utils/journalData';
+import { collisionReadingId } from '@/features/Journal/utils/journalBackup';
 import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorage';
 import { captureBackup } from '@/test/captureBackup';
+
+const deviceImportButton = () => screen.queryByRole('button', { name: /Import this device/ });
 
 describe('importing a guest journal into an account', () => {
   it('keeps unverified accounts in the guest journal and imports only after verification and confirmation', async () => {
@@ -56,7 +61,7 @@ describe('importing a guest journal into an account', () => {
     expect(await screen.findByRole('heading', { name: firstReading.question })).toBeVisible();
     expect(screen.queryByRole('heading', { name: deviceReading.question })).toBeNull();
     expect(mockJournal.importAccountReadings).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: /Import this device/ }));
+    await user.click(await screen.findByRole('button', { name: /Import this device/ }));
     const preview = within(await screen.findByRole('dialog', { name: 'Review journal import' }));
     expect(preview.getByText(firstUser.email)).toBeVisible();
     expect(mockJournal.previewAccountImport.mock.lastCall?.slice(0, 2)).toEqual([
@@ -66,6 +71,7 @@ describe('importing a guest journal into an account', () => {
     expect(mockJournal.importAccountReadings).not.toHaveBeenCalled();
     await user.click(preview.getByRole('button', { name: 'Confirm import' }));
     expect(await screen.findByRole('heading', { name: deviceReading.question })).toBeVisible();
+    await waitFor(() => expect(deviceImportButton()).toBeNull());
     expect(localStorage.getItem(guestStorageKey)).toBe(original);
     const previousListener = mockJournal.observeReadings.mock.lastCall![2];
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
@@ -77,6 +83,80 @@ describe('importing a guest journal into an account', () => {
     expect(screen.getByRole('heading', { name: nextReading.question })).toBeVisible();
     expect(screen.queryByRole('heading', { name: firstReading.question })).toBeNull();
     expect(screen.queryByRole('heading', { name: deviceReading.question })).toBeNull();
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+  });
+
+  it('recognizes an import beyond the first page and offers it again after its account copy is deleted', async () => {
+    const original = localStorage.getItem(guestStorageKey);
+    const occupiedId = buildReading(deviceReading.id, 'A different draw with the same old ID');
+    const imported = {
+      ...deviceReading,
+      id: await collisionReadingId(deviceReading),
+      sourceId: deviceReading.id,
+      revealed: [true, true],
+    };
+    const recent = Array.from({ length: 50 }, (_, index) => ({
+      ...buildReading(`recent-${index}`, `A newer draw ${index + 1}`),
+      createdAt: '2026-11-23T12:00:00.000Z',
+    }));
+    restoreAccountOnMount(firstUser);
+    records.set(firstUser.uid, [...recent, occupiedId]);
+    mount();
+    expect(await screen.findByRole('button', { name: 'Load older readings' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+    act(() => publish(firstUser.uid, [...recent, occupiedId, imported]));
+    expect(screen.queryByRole('heading', { name: deviceReading.question })).toBeNull();
+    await waitFor(() => expect(deviceImportButton()).toBeNull());
+    expect(screen.getByRole('button', { name: 'Import journal' })).toBeVisible();
+    act(() => publish(firstUser.uid, [...recent, occupiedId]));
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+    expect(localStorage.getItem(guestStorageKey)).toBe(original);
+  });
+
+  it('only counts saved copies when the offline journal shows other pending writes', async () => {
+    restoreAccountOnMount(firstUser);
+    mount();
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+
+    const showOfflinePage = mockJournal.observeReadings.mock.lastCall![2];
+    const entries = [firstReading, deviceReading];
+    const offlinePage = { ...synced, fromCache: true, pending: true };
+    act(() => showOfflinePage(entries, { ...offlinePage, storedReadings: [deviceReading] }));
+    await waitFor(() => expect(deviceImportButton()).toBeNull());
+
+    act(() => showOfflinePage(entries, { ...offlinePage, storedReadings: [firstReading] }));
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: deviceReading.question })).toBeVisible();
+  });
+
+  it('offers new reveal progress and a separate matching draw saved by another guest tab', async () => {
+    restoreAccountOnMount(firstUser);
+    records.set(firstUser.uid, [deviceReading]);
+    mount();
+    expect(await screen.findByRole('heading', { name: deviceReading.question })).toBeVisible();
+    await waitFor(() => expect(deviceImportButton()).toBeNull());
+
+    const revealed = { ...deviceReading, revealed: [true, true] };
+    const saveInGuestTab = (readings: Reading[]) => {
+      const newValue = JSON.stringify({ ...freshData(), readings });
+      localStorage.setItem(guestStorageKey, newValue);
+      act(() => {
+        window.dispatchEvent(
+          new StorageEvent('storage', {
+            key: guestStorageKey,
+            newValue,
+            storageArea: localStorage,
+          }),
+        );
+      });
+    };
+    saveInGuestTab([revealed]);
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+    act(() => publish(firstUser.uid, [revealed]));
+    await waitFor(() => expect(deviceImportButton()).toBeNull());
+    saveInGuestTab([revealed, { ...revealed, id: 'second-draw' }]);
+    expect(await screen.findByRole('button', { name: /Import this device/ })).toBeVisible();
+    expect(mockJournal.importAccountReadings).not.toHaveBeenCalled();
   });
 
   it('downloads and previews unsaved guest changes after signing in even when another tab changed the journal', async () => {
@@ -118,6 +198,10 @@ describe('importing a guest journal into an account', () => {
       ]);
       expect(mockJournal.importAccountReadings).not.toHaveBeenCalled();
       expect(localStorage.getItem(guestStorageKey)).toBe(saved);
+      await user.click(dialog.getByRole('button', { name: 'Cancel' }));
+      act(() => publish(firstUser.uid, [edited, sibling]));
+      await waitFor(() => expect(deviceImportButton()).toBeNull());
+      expect(screen.getByRole('button', { name: 'Download guest backup' })).toBeVisible();
     } finally {
       vi.restoreAllMocks();
       vi.unstubAllGlobals();

@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { expect } from '@playwright/test';
+import { devices, expect, webkit } from '@playwright/test';
 import { verifyEmulatorEmail } from '../../../../../../../scripts/emulator-email.mjs';
 import { guestStorageKey } from '../../../GuestJournal/utils/guestStorageKey.ts';
-import { withApp, downloadReadings } from '../../../../../../test/emulator/journalBrowser.mjs';
+import {
+  authenticate,
+  downloadReadings,
+  withApp,
+} from '../../../../../../test/emulator/journalBrowser.mjs';
 
 test(
   'guest readings stay local until email verification and confirmed import, then sync across browsers',
@@ -136,4 +140,57 @@ test(
       [true, true, false],
     );
   }),
+);
+
+test(
+  'a completed device import stays hidden after reopening and new guest readings can be imported',
+  withApp(async (base, browser) => {
+    const context = await browser.newContext(devices['iPhone 13']);
+    const phone = await context.newPage();
+    const email = 'device-import-' + randomUUID() + '@example.test';
+    const password = 'Local-emulator-' + randomUUID();
+    const firstQuestion = 'A guest reading before signing in';
+    const secondQuestion = 'A guest reading after the first import';
+    const importOffer = (page) =>
+      page.getByRole('button', { name: 'Import this device’s journal' });
+
+    await phone.goto(base);
+    await phone.getByLabel(/What’s on your mind/).fill(firstQuestion);
+    await phone.getByRole('button', { name: /Draw Cards/ }).click();
+    await phone.getByRole('link', { name: /^Journal/ }).click();
+    await expect(phone.getByRole('heading', { name: firstQuestion })).toBeVisible();
+    await authenticate(base, phone, email, password, { signup: true, trust: true });
+    await importOffer(phone).click();
+    await phone.getByRole('button', { name: 'Confirm import' }).click();
+    await expect(phone.getByText('Imported 1 reading.', { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(importOffer(phone)).toHaveCount(0);
+    await phone.close();
+
+    const reopened = await context.newPage();
+    await reopened.goto(base + '/journal');
+    await expect(reopened.getByRole('heading', { name: email })).toBeVisible();
+    await expect(reopened.getByRole('heading', { name: firstQuestion })).toBeVisible();
+    await expect(importOffer(reopened)).toHaveCount(0);
+    await reopened.getByRole('button', { name: 'Sign out' }).click();
+    await expect(reopened.getByRole('main').getByRole('link', { name: 'Sign in' })).toBeVisible();
+    await reopened.getByRole('button', { name: 'Open reading: ' + firstQuestion }).click();
+    await reopened.getByRole('button', { name: 'New Reading', exact: true }).click();
+    await reopened.getByLabel(/What’s on your mind/).fill(secondQuestion);
+    await reopened.getByRole('button', { name: /Draw Cards/ }).click();
+    await reopened.getByRole('link', { name: /^Journal/ }).click();
+    await expect(reopened.getByRole('heading', { name: secondQuestion })).toBeVisible();
+    await authenticate(base, reopened, email, password, { trust: true });
+    await expect(reopened.getByRole('heading', { name: secondQuestion })).toHaveCount(0);
+    await importOffer(reopened).click();
+    await reopened.getByRole('button', { name: 'Confirm import' }).click();
+    await expect(
+      reopened.getByText('Imported 1 reading. Skipped 1 reading already in your journal.'),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(reopened.getByRole('heading', { name: secondQuestion })).toBeVisible();
+    await expect(importOffer(reopened)).toHaveCount(0);
+    await expect(reopened.getByRole('heading', { name: firstQuestion })).toBeVisible();
+    await expect(reopened.getByRole('button', { name: /^Open reading:/ })).toHaveCount(2);
+  }, webkit),
 );
