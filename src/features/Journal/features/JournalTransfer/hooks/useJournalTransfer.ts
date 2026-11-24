@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import { useJournalSession } from '@/features/Journal/hooks/useJournalSession';
 import {
   createJournalBackup,
@@ -11,11 +10,7 @@ import {
   guestConflictMessage,
 } from '@/features/Journal/features/GuestJournal/utils/guestDraft';
 import { loadData, saveData } from '@/features/Journal/features/GuestJournal/utils/guestStorage';
-import {
-  waitForGuestWrites,
-  withGuestWrite,
-} from '@/features/Journal/features/GuestJournal/utils/guestWrite';
-import { recoverGuestReadings } from '@/features/Journal/features/GuestJournal/utils/guestRecovery';
+import { withGuestWrite } from '@/features/Journal/features/GuestJournal/utils/guestWrite';
 import type { RecoveryCopy } from '@/features/Journal/features/AccountJournal/utils/readingRecovery';
 import { checkSiblingRecovery } from '@/services/Journal/journalActivity';
 import {
@@ -26,40 +21,12 @@ import {
   type WatchExportHistory,
 } from '@/services/Journal/journal.service';
 import type { JournalExport } from '../transferTypes';
+import { useDeviceJournalImport } from './useDeviceJournalImport';
 
 export const useJournalTransfer = () => {
   const { account, user, journalUid, historyRevision, getGuestDraft, updateGuestReadings } =
     useJournalSession();
-  const getDeviceCount = useCallback(
-    () => (getGuestDraft() ? ('unsaved' as const) : loadData().data.readings.length),
-    [getGuestDraft],
-  );
-  const [deviceCount, setDeviceCount] = useState(() => (journalUid ? getDeviceCount() : 0));
-  useEffect(() => {
-    if (!journalUid) return;
-    let active = true;
-    const refreshCount = () => {
-      if (active) setDeviceCount(getDeviceCount());
-    };
-    // A guest write can finish after signing in has mounted the account journal.
-    void waitForGuestWrites().then(refreshCount);
-    window.addEventListener('storage', refreshCount);
-    return () => {
-      active = false;
-      window.removeEventListener('storage', refreshCount);
-    };
-  }, [journalUid, getDeviceCount]);
-  const guestReadingsForTransfer = async () => {
-    await waitForGuestWrites();
-    const draft = getGuestDraft();
-    const stored = loadData();
-    if (draft)
-      return guestDraftConflicts(draft, stored)
-        ? recoverGuestReadings(draft.base.readings, draft.data.readings, stored.data.readings)
-        : draft.data.readings;
-    if (stored.warning) throw new Error('The saved journal could not be read to create a backup.');
-    return stored.data.readings;
-  };
+  const deviceImport = useDeviceJournalImport();
   const exportJournal = async (allowUncheckedDeletions = false): Promise<JournalExport> => {
     if (journalUid) {
       const checkOtherTabs = async () => {
@@ -102,7 +69,7 @@ export const useJournalTransfer = () => {
       };
     }
     const json = await createJournalBackup(async () => ({
-      readings: await guestReadingsForTransfer(),
+      readings: await deviceImport.getDeviceReadings(),
       nextCursor: null,
     }));
     return { json, scope: 'journal' };
@@ -171,8 +138,7 @@ export const useJournalTransfer = () => {
     recoveryComplete: account.recoveryComplete,
     getRecoveryForExport: account.getRecoveryForExport,
     savedRecovery: account.savedRecovery,
-    deviceCount,
-    getDeviceReadings: guestReadingsForTransfer,
+    ...deviceImport,
     onExport: exportJournal,
     onPreview: previewImport,
     onImport: importJournal,

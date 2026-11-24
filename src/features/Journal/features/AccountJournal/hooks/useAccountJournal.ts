@@ -12,6 +12,7 @@ import {
   removeReading,
   revealCards,
   type AccountClearReview,
+  type JournalSyncState,
 } from '@/services/Journal/journal.service';
 import type { Reading } from '@/features/Journal/readingTypes';
 import type { PendingDeletion } from '@/services/Journal/Deletions/deletionQueue';
@@ -86,7 +87,11 @@ export const useAccountJournal = (
 ) => {
   const [limit, setLimit] = useState(historyPageSize);
   const [readings, setReadings] = useState<Reading[]>([]);
-  const [snapshot, setSnapshot] = useState({ fromCache: true, pending: false, hasMore: false });
+  const [snapshot, setSnapshot] = useState<JournalSyncState>({
+    fromCache: true,
+    pending: false,
+    hasMore: false,
+  });
   const [received, setReceived] = useState(false);
   const [selected, setSelected] = useState<{ id: string; value: Reading | null } | null>(null);
   const drafts = useRef(new Map<string, UnsavedDraw>()).current;
@@ -762,6 +767,7 @@ export const useAccountJournal = (
 
   return {
     entries: entries.filter((entry) => !isHidden(entry)),
+    storedReadings: snapshot.storedReadings ?? (received && !snapshot.pending ? readings : null),
     active,
     pending: pending || rejected.length > 0 || failedReveals.size > 0,
     trusted,

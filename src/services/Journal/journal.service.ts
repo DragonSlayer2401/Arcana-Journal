@@ -1,4 +1,4 @@
-import type { DocumentSnapshot, Firestore } from 'firebase/firestore';
+import type { DocumentSnapshot, Firestore, Query, QuerySnapshot } from 'firebase/firestore';
 import { firestoreSdk } from '../Firebase/firebaseSdk';
 import {
   assignReadingId,
@@ -117,6 +117,8 @@ export interface JournalSyncState {
   fromCache: boolean;
   pending: boolean;
   hasMore: boolean;
+  /** Already saved rows in a page that also contains pending writes. */
+  storedReadings?: Reading[];
 }
 
 // Collision resolution occasionally needs a document outside the observed page.
@@ -187,32 +189,22 @@ const listen = (
   };
 };
 
-export const observeReadings = (
+const observeReadingQuery = (
   uid: string,
-  count: number,
-  onChange: (readings: Reading[], state: JournalSyncState) => void,
+  queryFor: (database: Firestore) => Query,
+  onSnapshot: (snapshot: QuerySnapshot) => void,
   onError: (error: Error) => void,
 ) =>
   listen(
     uid,
-    (database, active) => {
-      const firestore = firestoreSdk();
-      const recent = firestore.query(
-        readingsFor(database, uid),
-        firestore.orderBy('createdAtMs', 'desc'),
-        firestore.limit(count + 1),
-      );
-      return firestore.onSnapshot(
-        recent,
+    (database, active) =>
+      firestoreSdk().onSnapshot(
+        queryFor(database),
         { includeMetadataChanges: true },
         (snapshot) => {
           if (!active()) return;
           try {
-            onChange(snapshot.docs.slice(0, count).map(decodeReading), {
-              fromCache: snapshot.metadata.fromCache,
-              pending: snapshot.metadata.hasPendingWrites,
-              hasMore: snapshot.size > count,
-            });
+            onSnapshot(snapshot);
           } catch (error) {
             onError(error as Error);
           }
@@ -220,8 +212,59 @@ export const observeReadings = (
         (error) => {
           if (active()) onError(error);
         },
+      ),
+    onError,
+  );
+
+export const observeReadings = (
+  uid: string,
+  count: number,
+  onChange: (readings: Reading[], state: JournalSyncState) => void,
+  onError: (error: Error) => void,
+) =>
+  observeReadingQuery(
+    uid,
+    (database) => {
+      const firestore = firestoreSdk();
+      return firestore.query(
+        readingsFor(database, uid),
+        firestore.orderBy('createdAtMs', 'desc'),
+        firestore.limit(count + 1),
       );
     },
+    (snapshot) => {
+      const page = snapshot.docs.slice(0, count);
+      const readings = page.map(decodeReading);
+      const pending = snapshot.metadata.hasPendingWrites;
+      onChange(readings, {
+        fromCache: snapshot.metadata.fromCache,
+        pending,
+        ...(pending && {
+          storedReadings: readings.filter((_, i) => !page[i].metadata.hasPendingWrites),
+        }),
+        hasMore: snapshot.size > count,
+      });
+    },
+    onError,
+  );
+
+export const observeReadingsOnDates = (
+  uid: string,
+  dates: number[],
+  onChange: (readings: Reading[]) => void,
+  onError: (error: Error) => void,
+) =>
+  observeReadingQuery(
+    uid,
+    (database) => {
+      const firestore = firestoreSdk();
+      return firestore.query(
+        readingsFor(database, uid),
+        firestore.where('createdAtMs', 'in', dates),
+      );
+    },
+    (snapshot) =>
+      onChange(snapshot.docs.filter((doc) => !doc.metadata.hasPendingWrites).map(decodeReading)),
     onError,
   );
 

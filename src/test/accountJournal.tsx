@@ -6,6 +6,7 @@ import * as account from '@/services/Account/account.service';
 import * as preferences from '@/services/Account/ReadingPreferences/readingPreferences.service';
 import * as journal from '@/services/Journal/journal.service';
 import { freshData } from '@/features/Journal/utils/journalData';
+import { readingEpoch } from '@/features/Journal/utils/readingDate';
 import { guestStorageKey } from '@/features/Journal/features/GuestJournal/utils/guestStorage';
 import type { Reading } from '@/features/Journal/readingTypes';
 import { TestApp, TestRouter } from './TestRouter';
@@ -32,6 +33,7 @@ vi.mock('@/services/Account/account.service', () => ({
 }));
 vi.mock('@/services/Journal/journal.service', () => ({
   observeReadings: vi.fn(),
+  observeReadingsOnDates: vi.fn(),
   observeReading: vi.fn(),
   observePendingDeletions: vi.fn(),
   readDeletionTarget: vi.fn(),
@@ -133,6 +135,17 @@ beforeEach(() => {
   });
   mockJournal.observeReading.mockImplementation((uid, id, listener) => {
     const notify = () => listener(records.get(uid)?.find((item) => item.id === id) ?? null);
+    activeListeners.add(notify);
+    notify();
+    return () => {
+      activeListeners.delete(notify);
+    };
+  });
+  mockJournal.observeReadingsOnDates.mockImplementation((uid, dates, listener) => {
+    const notify = () =>
+      listener(
+        records.get(uid)!.filter((reading) => dates.includes(readingEpoch(reading.createdAt))),
+      );
     activeListeners.add(notify);
     notify();
     return () => {
